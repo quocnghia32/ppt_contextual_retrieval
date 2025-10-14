@@ -8,6 +8,7 @@ from langchain.chains import ConversationalRetrievalChain
 from langchain.memory import ConversationBufferMemory
 from langchain_anthropic import ChatAnthropic
 from langchain_openai import ChatOpenAI
+#from langchain_xai import ChatXAI
 from langchain.prompts import PromptTemplate
 from langchain.schema import BaseRetriever, Document
 from langchain.callbacks.streaming_stdout import StreamingStdOutCallbackHandler
@@ -127,6 +128,18 @@ class PPTQAChain:
                     callbacks=callbacks
                 )
                 self.provider = "anthropic"
+
+                # Use Grok
+                # self.llm = ChatXAI(
+                #     model = "grok-4-fast-reasoning",
+                #     api_key=settings.xai_api_key,
+                #     max_tokens=2000,
+                #     temperature=0.0,
+                #     streaming=enable_streaming,
+                #     callbacks=callbacks
+                # )
+                # self.provider = "xai"
+
 
         # Initialize memory
         self.memory = None

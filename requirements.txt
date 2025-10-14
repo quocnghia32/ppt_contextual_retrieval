@@ -4,8 +4,6 @@ langchain-anthropic>=0.1.0
 langchain-openai>=0.1.0
 langchain-pinecone>=0.1.0
 langchain-community>=0.0.20
-langchain-cohere>=0.1.0
-cohere
 
 # Vector Stores
 pinecone-client>=3.2.2,<4.0.0

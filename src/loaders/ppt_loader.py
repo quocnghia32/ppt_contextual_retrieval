@@ -1,9 +1,10 @@
 """
 Custom LangChain document loader for PowerPoint files.
 """
+import os
 from langchain.document_loaders.base import BaseLoader
 from langchain.schema import Document
-from typing import List, Optional
+from typing import List, Optional, Tuple
 import hashlib
 import json
 from pptx import Presentation
@@ -47,7 +48,7 @@ class PPTLoader(BaseLoader):
         self.extract_tables = extract_tables
         self.vision_analyzer = VisionAnalyzer() if use_vision else None
 
-    async def load(self) -> List[Document]:
+    async def load(self) -> Tuple[List[Document], Document]:
         """
         Load PPT and return list of LangChain Documents.
 
@@ -65,6 +66,17 @@ class PPTLoader(BaseLoader):
 
             # Detect sections (if any)
             sections = self._detect_sections(prs)
+
+            logger.info(f"Detected {len(sections)} sections")
+           
+            # Add a overall information document about current file
+            overall_info = Document(
+                page_content=self._extract_ppt_info(prs),
+                metadata={"source": self.file_path,
+                          "slide_number": 0,
+                          
+                          }
+            )
 
             for slide_idx, slide in enumerate(prs.slides):
                 slide_num = slide_idx + 1
@@ -124,7 +136,8 @@ class PPTLoader(BaseLoader):
                 full_content = self._build_full_content(
                     slide_text,
                     speaker_notes,
-                    tables_info
+                    tables_info,
+                    images_info
                 )
 
                 # Create Document
@@ -135,11 +148,67 @@ class PPTLoader(BaseLoader):
                 documents.append(doc)
 
             logger.info(f"Successfully loaded {len(documents)} slides")
-            return documents
+            return documents, overall_info
 
         except Exception as e:
             logger.error(f"Failed to load PPT {self.file_path}: {e}")
             raise
+
+    def _extract_ppt_info(self, prs: Presentation) -> str:
+        """
+        Extracts simple overall information from a PPTX presentation.
+        Includes file name, total slides, section names, and slide titles.
+        """
+        props = prs.core_properties
+        total_slides = len(prs.slides)
+        file_name = os.path.basename(self.file_path)
+
+        title = props.title or file_name
+        author = props.author or "Unknown author"
+        created = props.created.strftime("%Y-%m-%d") if props.created else "Unknown"
+        modified = props.modified.strftime("%Y-%m-%d") if props.modified else "Unknown"
+
+        # --- Try to get section names ---
+        # python-pptx doesn’t expose sections directly, but you can read them via the underlying XML
+        section_names = []
+        try:
+            sldIdLst = prs.part.element.xpath("//p:sldIdLst/p:sldId")
+            sections = prs.part.element.xpath("//p:sectionLst/p:section")
+            for s in sections:
+                name = s.get("name")
+                if name:
+                    section_names.append(name)
+        except Exception:
+            section_names = []
+
+        # --- Slide titles ---
+        slide_titles = []
+        for i, slide in enumerate(prs.slides, start=1):
+            title_shape = slide.shapes.title
+            if title_shape and title_shape.text.strip():
+                title_text = title_shape.text.strip()
+            else:
+                title_text = "(No title)"
+            slide_titles.append(f"{i}. {title_text}")
+
+        # --- Build summary text ---
+        info_text = (
+            f"OVERALL INFORMATION ABOUT THE PRESENTATION/FILE/SLIDES:\n"
+            f"File name: {file_name}\n"
+            f"Presentation title: {title}\n"
+            f"Author: {author}\n"
+            f"Total slides: {total_slides}\n"
+            f"Created: {created}\n"
+            f"Modified: {modified}\n"
+        )
+
+        if section_names:
+            info_text += "Sections:\n" + "\n".join(f"- {s}" for s in section_names) + "\n"
+
+        info_text += "\nSlide titles:\n" + "\n".join(slide_titles)
+
+        return info_text
+
 
     def _extract_presentation_title(self, prs: Presentation) -> str:
         """Extract presentation title from first slide."""
@@ -330,7 +399,8 @@ class PPTLoader(BaseLoader):
         self,
         slide_text: str,
         speaker_notes: str,
-        tables: List[dict]
+        tables: List[dict],
+        images: List[dict]
     ) -> str:
         """Build full content string from all text sources."""
         parts = []
@@ -347,6 +417,20 @@ class PPTLoader(BaseLoader):
         # Add speaker notes
         if speaker_notes:
             parts.append(f"\n[Speaker Notes]\n{speaker_notes}")
+
+        
+        image_texts = []
+        for idx, img in enumerate(images, 1):
+            img_text_parts = [f"\n\n[IMAGE {idx}]"]
+
+            # Add vision description
+            if img.get("vision_description"):
+                img_text_parts.append(f"Description: {img['vision_description']}")
+
+            image_texts.append(" ".join(img_text_parts))
+
+        # Append all image info to page content
+        parts.append("".join(image_texts))
 
         return "\n\n".join(parts)
 

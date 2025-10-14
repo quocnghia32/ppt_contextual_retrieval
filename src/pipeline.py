@@ -13,6 +13,7 @@ from langchain_pinecone import PineconeVectorStore
 from pinecone import Pinecone, ServerlessSpec
 from loguru import logger
 
+from src.get_all_text import whole_document_from_pptx
 from src.config import settings
 from src.loaders.ppt_loader import PPTLoader
 from src.splitters.contextual_splitter import ContextualTextSplitter
@@ -97,9 +98,13 @@ class PPTContextualRetrievalPipeline:
             include_speaker_notes=include_notes,
             use_vision=self.use_vision
         )
-        self.documents = await loader.load()
+        self.documents, self.overall_info = await loader.load()
 
         logger.info(f"Loaded {len(self.documents)} slides")
+
+        # Step 2: Get the whole_document phase
+        logger.info("Step 2/5: Getting alll text...")
+        all_doc_text = whole_document_from_pptx(ppt_path)
 
         # # Step 2: Vision Analysis (if enabled)
         # if self.use_vision and self.vision_analyzer:
@@ -111,12 +116,15 @@ class PPTContextualRetrievalPipeline:
         # Step 3: Contextual Chunking
         logger.info("Step 3/5: Creating contextual chunks...")
         splitter = ContextualTextSplitter(add_context=self.use_contextual)
-        self.chunks = await splitter.asplit_documents(self.documents)
+
+        self.chunks = await splitter.asplit_documents(all_doc_text, self.documents)
+        # Overall info chunk has not been split
+        self.chunks = [self.overall_info] + self.chunks
 
         logger.info(f"Created {len(self.chunks)} chunks")
+        
 
-        # Step 4: Create/Connect to Pinecone Index
-        logger.info("Step 4/5: Setting up vector store...")
+        # Step 4: Create/Connect to Pinecone Index        logger.info("Step 4/5: Setting up vector store...")
         await self._setup_pinecone_index()
 
         # Step 5: Index chunks

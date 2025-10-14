@@ -87,6 +87,7 @@ class ContextualTextSplitter(TextSplitter):
             ],
             template="""<instructions>
 You are a contextual retrieval assistant. Your task is to generate a concise context (50-100 tokens) for text chunks from PowerPoint presentations.
+Please give a short succinct context to situate this chunk within the overall document for the purposes of improving search retrieval of the chunk. Answer only with the succinct context and nothing else. 
 
 The context should:
 1. Situate the chunk within the presentation structure
@@ -100,6 +101,8 @@ Output only the context, nothing else.
 <document>
 Presentation: {presentation_title}
 Total Slides: {total_slides}
+All slides content:
+{all_slides_content}
 </document>
 
 <current_chunk>
@@ -118,7 +121,7 @@ Context:"""
 
         provider_name = getattr(self, 'provider', 'custom')
         model_name = getattr(self.llm, 'model_name', getattr(self.llm, 'model', 'unknown'))
-
+        
         logger.info(
             f"ContextualTextSplitter initialized: "
             f"provider={provider_name}, model={model_name}, "
@@ -143,7 +146,7 @@ Context:"""
         """
         return asyncio.run(self.asplit_documents(documents))
 
-    async def asplit_documents(self, documents: List[Document]) -> List[Document]:
+    async def asplit_documents(self, all_doc_text: str, documents: List[Document]) -> List[Document]:
         """
         Async version: Split documents into contextual chunks.
         """
@@ -180,13 +183,15 @@ Context:"""
 
             # Generate contexts in batches
             if self.add_context and chunks:
-                chunks = await self._add_contexts_batch(chunks)
+                chunks = await self._add_contexts_batch(all_doc_text,chunks)
 
             # Create final documents
             for chunk in chunks:
                 if self.add_context and "context" in chunk:
                     # Prepend context to chunk for embedding
                     content = f"{chunk['context']}\n\n{chunk['text']}"
+                    with open(f"CONTEXT/{chunk["metadata"]["slide_number"]}.txt", "w", encoding="utf-8") as f:
+                        f.write(f"{chunk['context']}\n\n{chunk['text']}\n\n")
                     # chunk["metadata"]["context"] = chunk["context"]
                     # chunk["metadata"]["original_text"] = chunk["text"]
                 else:
@@ -202,7 +207,7 @@ Context:"""
         logger.info(f"Created {len(all_chunks)} contextual chunks from {len(documents)} documents")
         return all_chunks
 
-    async def _add_contexts_batch(self, chunks: List[dict]) -> List[dict]:
+    async def _add_contexts_batch(self, all_doc_text: str, chunks: List[dict]) -> List[dict]:
         """
         Add context to chunks in batches for efficiency.
         """
@@ -215,7 +220,7 @@ Context:"""
 
             # Generate contexts in parallel
             tasks = [
-                self._generate_context_async(chunk)
+                self._generate_context_async(all_doc_text, chunk)
                 for chunk in batch
             ]
 
@@ -234,7 +239,7 @@ Context:"""
         return chunks
 
     @with_retry(max_attempts=3)
-    async def _generate_context_async(self, chunk: dict) -> str:
+    async def _generate_context_async(self, all_doc_text: str, chunk: dict) -> str:
         """
         Generate context for a single chunk (async).
         """
@@ -257,6 +262,7 @@ Context:"""
                 presentation_title=metadata.get("presentation_title", "Unknown"),
                 slide_number=metadata.get("slide_number", "?"),
                 total_slides=metadata.get("total_slides", "?"),
+                all_slides_content=all_doc_text,
                 section=metadata.get("section", "Unknown"),
                 slide_title=metadata.get("slide_title", ""),
                 chunk_content=chunk["text"][:500],  # Limit input size

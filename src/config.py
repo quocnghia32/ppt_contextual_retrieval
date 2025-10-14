@@ -15,6 +15,7 @@ class Settings(BaseSettings):
     openai_api_key: str = Field(..., env="OPENAI_API_KEY")
     pinecone_api_key: str = Field(..., env="PINECONE_API_KEY")
     cohere_api_key: Optional[str] = Field(None, env="COHERE_API_KEY")
+    xai_api_key: str = Field(..., env="XAI_API_KEY")
 
     # Pinecone Configuration
     pinecone_environment: str = Field("us-east-1", env="PINECONE_ENVIRONMENT")

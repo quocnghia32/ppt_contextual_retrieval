@@ -22,6 +22,7 @@ wheels/
 
 # Virtual Environment
 venv/
+.venv/
 env/
 ENV/
 
@@ -68,3 +69,6 @@ htmlcov/
 
 # Redis
 dump.rdb
+
+
+CONTEXT/
