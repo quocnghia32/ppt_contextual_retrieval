@@ -54,8 +54,6 @@ class PPTContextualRetrievalPipeline:
         # Initialize components with caching
         self.embeddings = get_cached_embeddings(model=settings.embedding_model)
 
-        self.vision_analyzer = VisionAnalyzer() if use_vision else None
-
         # Storage
         self.documents = []
         self.chunks = []
@@ -73,8 +71,7 @@ class PPTContextualRetrievalPipeline:
         self,
         ppt_path: str,
         extract_images: bool = True,
-        include_notes: bool = True,
-        analyze_images: bool = None
+        include_notes: bool = True
     ) -> Dict[str, Any]:
         """
         Index a PowerPoint presentation.
@@ -91,25 +88,25 @@ class PPTContextualRetrievalPipeline:
             Indexing statistics
         """
         logger.info(f"Starting indexing: {ppt_path}")
-        analyze_images = analyze_images if analyze_images is not None else self.use_vision
 
         # Step 1: Load PPT
         logger.info("Step 1/5: Loading presentation...")
         loader = PPTLoader(
             ppt_path,
             extract_images=extract_images,
-            include_speaker_notes=include_notes
+            include_speaker_notes=include_notes,
+            use_vision=self.use_vision
         )
-        self.documents = loader.load()
+        self.documents = await loader.load()
 
         logger.info(f"Loaded {len(self.documents)} slides")
 
-        # Step 2: Vision Analysis (if enabled)
-        if analyze_images and self.vision_analyzer:
-            logger.info("Step 2/5: Analyzing images...")
-            await self._analyze_slide_images(ppt_path)
-        else:
-            logger.info("Step 2/5: Skipping image analysis")
+        # # Step 2: Vision Analysis (if enabled)
+        # if self.use_vision and self.vision_analyzer:
+        #     logger.info("Step 2/5: Analyzing images...")
+        #     await self._analyze_slide_images(ppt_path)
+        # else:
+        #     logger.info("Step 2/5: Skipping image analysis")
 
         # Step 3: Contextual Chunking
         logger.info("Step 3/5: Creating contextual chunks...")
@@ -135,36 +132,13 @@ class PPTContextualRetrievalPipeline:
             "chunks": len(self.chunks),
             "indexed": True,
             "contextual": self.use_contextual,
-            "vision_analyzed": analyze_images and self.vision_analyzer is not None
+            "vision_analyzed":  self.use_vision
         }
 
         logger.info(f"Indexing complete: {stats}")
         return stats
 
-    async def _analyze_slide_images(self, ppt_path: str):
-        """Analyze images in slides using vision model."""
-        if not self.vision_analyzer:
-            return
-
-        for doc in self.documents:
-            if doc.metadata.get("has_images", False):
-                slide_num = doc.metadata["slide_number"]
-
-                try:
-                    # Analyze images
-                    analyses = await self.vision_analyzer.analyze_slide_images(
-                        ppt_path,
-                        slide_num,
-                        doc.metadata
-                    )
-
-                    # Add to metadata (convert to JSON string for Pinecone compatibility)
-                    if analyses:
-                        doc.metadata["image_analyses"] = json.dumps(analyses)
-                        logger.debug(f"Analyzed {len(analyses)} images in slide {slide_num}")
-
-                except Exception as e:
-                    logger.warning(f"Image analysis failed for slide {slide_num}: {e}")
+    
 
     async def _setup_pinecone_index(self):
         """Create or connect to Pinecone index."""
@@ -212,6 +186,7 @@ class PPTContextualRetrievalPipeline:
         try:
             # Add documents to vector store
             # LangChain will handle embedding
+
             self.vector_store.add_documents(self.chunks)
 
             logger.info(f"Indexed {len(self.chunks)} chunks to Pinecone")

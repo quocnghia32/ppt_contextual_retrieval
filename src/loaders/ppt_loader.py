@@ -12,7 +12,8 @@ from PIL import Image
 import io
 from loguru import logger
 
-
+from src.models.vision_analyzer import VisionAnalyzer
+from src.utils.image_checker import is_valid_image
 class PPTLoader(BaseLoader):
     """
     LangChain Document Loader for PowerPoint (.pptx) files.
@@ -25,6 +26,8 @@ class PPTLoader(BaseLoader):
         file_path: str,
         extract_images: bool = True,
         include_speaker_notes: bool = True,
+        use_vision: bool = True,
+        extract_charts: bool = True,
         extract_tables: bool = True
     ):
         """
@@ -34,14 +37,17 @@ class PPTLoader(BaseLoader):
             file_path: Path to .pptx file
             extract_images: Whether to extract images from slides
             include_speaker_notes: Whether to include speaker notes
+            extract_charts: Whether to extract chart data
             extract_tables: Whether to extract table data
         """
         self.file_path = file_path
         self.extract_images = extract_images
         self.include_speaker_notes = include_speaker_notes
+        self.extract_charts = extract_charts
         self.extract_tables = extract_tables
+        self.vision_analyzer = VisionAnalyzer() if use_vision else None
 
-    def load(self) -> List[Document]:
+    async def load(self) -> List[Document]:
         """
         Load PPT and return list of LangChain Documents.
 
@@ -78,7 +84,13 @@ class PPTLoader(BaseLoader):
                 # Extract images
                 images_info = []
                 if self.extract_images:
-                    images_info = self._extract_images_info(slide, slide_num)
+                    images_info = await self._extract_images_info(slide, slide_num)
+
+
+                # Extract charts
+                charts_info = []
+                if self.extract_images:
+                    charts_info = self._extract_charts_info(slide, slide_num)
 
                 # Extract tables
                 tables_info = []
@@ -99,10 +111,10 @@ class PPTLoader(BaseLoader):
                     "slide_title": slide_title,
                     "section": section,
                     "speaker_notes": speaker_notes,
-                    "has_images": len(images_info) > 0,
                     "image_count": len(images_info),
                     "images": json.dumps(images_info),  # Convert to JSON string
-                    "has_tables": len(tables_info) > 0,
+                    "chart_count": len(charts_info),
+                    "charts": json.dumps(charts_info),  # Convert to JSON string
                     "table_count": len(tables_info),
                     "tables": json.dumps(tables_info),  # Convert to JSON string
                     "type": "slide"
@@ -155,27 +167,61 @@ class PPTLoader(BaseLoader):
                 text_parts.append(shape.text.strip())
 
         return "\n\n".join(text_parts)
+    
+    def _extract_charts_info(self, slide, slide_num: int) -> List[dict]:
+        """Extract chart data from slide."""
+        charts = []
 
-    def _extract_images_info(self, slide, slide_num: int) -> List[dict]:
+        for shape_idx, shape in enumerate(slide.shapes):
+            if shape.shape_type == MSO_SHAPE_TYPE.CHART:
+                charts.append({
+                    "slide_number": slide_num,
+                    "shape_index": shape_idx,
+                    "type": "chart",
+                    "shape_id": shape.shape_id
+                })
+
+        return charts
+
+    async def _extract_images_info(self, slide, slide_num: int) -> List[dict]:
         """
         Extract information about images in slide.
-
-        Returns list of image metadata (not the actual images yet).
         """
         images = []
+        # data = f"""
+        #             **Context Information:**
+        #             - Slide Number: {slide_context.get('slide_number')}
+        #             - Section: {slide_context.get('section', 'Unknown')}
+        #             - Slide Title: {slide_context.get('slide_title', 'Unknown')}
+        #             - Total Slides: {slide_context.get('total_slides', 'Unknown')}
+        #             """
+        success_count = 0
 
         for shape_idx, shape in enumerate(slide.shapes):
             if shape.shape_type == MSO_SHAPE_TYPE.PICTURE:
                 try:
+                    image = shape.image
+                    image_bytes = image.blob
+                    image_ext = image.ext
+                    if not is_valid_image(image_bytes):
+                        logger.warning(f"Skipping invalid image with shape index {shape_idx} in slide {slide_num}")
+                        continue
+
                     # Get image info
                     image_info = {
                         "slide_number": slide_num,
-                        "shape_index": shape_idx,
+                        "image_index": shape_idx,
                         "type": "picture",
-                        "has_image": True,
                         # Store reference for later processing
-                        "shape_id": shape.shape_id
+                        "shape_id": shape.shape_id,
+                        "image_format": image_ext,
+                        "image_size": len(image_bytes)
                     }
+                    vision_description = await self.vision_analyzer.process_image(self.file_path, image_info, image_bytes)
+                    if vision_description is not None:
+                        # Add image metadata
+                        success_count += 1
+                        image_info['vision_description'] = vision_description
 
                     # Try to get dimensions
                     if hasattr(shape, "width") and hasattr(shape, "height"):
@@ -186,17 +232,7 @@ class PPTLoader(BaseLoader):
 
                 except Exception as e:
                     logger.warning(f"Failed to process image in slide {slide_num}: {e}")
-
-            # Check for charts (treated as images for vision analysis)
-            elif shape.shape_type == MSO_SHAPE_TYPE.CHART:
-                images.append({
-                    "slide_number": slide_num,
-                    "shape_index": shape_idx,
-                    "type": "chart",
-                    "has_image": True,
-                    "shape_id": shape.shape_id
-                })
-
+        logger.debug(f"Analyzed {success_count} images in slide {slide_num}")
         return images
 
     def _extract_tables(self, slide) -> List[dict]:

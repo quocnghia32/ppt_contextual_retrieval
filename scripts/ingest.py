@@ -72,7 +72,6 @@ async def ingest_single_file(
         str(ppt_file.absolute()),
         extract_images=extract_images,
         include_notes=include_notes,
-        analyze_images=use_vision
     )
 
     elapsed = time.time() - start_time

@@ -187,11 +187,11 @@ Context:"""
                 if self.add_context and "context" in chunk:
                     # Prepend context to chunk for embedding
                     content = f"{chunk['context']}\n\n{chunk['text']}"
-                    chunk["metadata"]["context"] = chunk["context"]
-                    chunk["metadata"]["original_text"] = chunk["text"]
+                    # chunk["metadata"]["context"] = chunk["context"]
+                    # chunk["metadata"]["original_text"] = chunk["text"]
                 else:
                     content = chunk["text"]
-
+                chunk["metadata"].pop("text", None)
                 all_chunks.append(
                     Document(
                         page_content=content,

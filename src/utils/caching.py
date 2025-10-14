@@ -220,7 +220,7 @@ class OpenAICachingManager:
 
         return stats
 
-
+print("HELLO WORLD")
 # Global caching manager instance
 caching_manager = OpenAICachingManager(
     cache_dir=settings.cache_dir,

@@ -30,4 +30,6 @@ If the image has no readable text or no meaningful content, still try your best:
 - If you don't know something, just say "NO INFORMATION" at that field
 - If the image does not provide insights, still make a reasonable effort.
 
+Please analyze this image and provide the response in the exact format specified above.
+
 """

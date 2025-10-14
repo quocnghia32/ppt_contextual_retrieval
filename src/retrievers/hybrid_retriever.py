@@ -239,10 +239,10 @@ class ContextualHybridRetriever(HybridRetriever):
         # Initialize reranker if enabled
         if use_reranking and settings.cohere_api_key:
             try:
-                from langchain.retrievers.document_compressors import CohereRerank
+                from langchain_cohere import CohereRerank
                 self.reranker = CohereRerank(
                     cohere_api_key=settings.cohere_api_key,
-                    model=reranker_model or "rerank-english-v2.0",
+                    model=reranker_model or "rerank-multilingual-v3.0",
                     top_n=settings.top_n_rerank
                 )
                 logger.info("Cohere reranker initialized")

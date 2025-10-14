@@ -167,12 +167,13 @@ def show_upload_page():
                 try:
                     # Generate index name
                     ppt_id = uploaded_file.name.replace('.pptx', '').replace(' ', '-').lower()
-                    index_name = f"ppt-{ppt_id}"[:50]
+                    #index_name = f"ppt-{ppt_id}"[:50]
+                    index_name = settings.pinecone_index_name
 
                     # Create pipeline
                     progress_bar = st.progress(0, text="Initializing pipeline...")
                     pipeline = PPTContextualRetrievalPipeline(
-                        index_name=index_name,
+                        #index_name=index_name,
                         use_contextual=add_context,
                         use_vision=extract_images,
                         use_reranking=True
@@ -181,11 +182,11 @@ def show_upload_page():
                     progress_bar.progress(20, text="Loading and analyzing presentation...")
 
                     # Index presentation
+                    logger.info(f"Indexing presentation: {uploaded_file.name} with path {upload_path}")
                     stats = asyncio.run(pipeline.index_presentation(
                         str(upload_path),
                         extract_images=extract_images,
                         include_notes=include_notes,
-                        analyze_images=extract_images
                     ))
 
                     progress_bar.progress(100, text="Indexing complete!")
