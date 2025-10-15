@@ -4,16 +4,16 @@ QA Chain for answering questions based on retrieved context.
 Uses Claude for answer generation with quality checking.
 """
 from typing import List, Dict, Optional, Any
-from langchain.chains import ConversationalRetrievalChain
 from langchain.memory import ConversationBufferMemory
 from langchain_anthropic import ChatAnthropic
 from langchain_openai import ChatOpenAI
-#from langchain_xai import ChatXAI
+from langchain_xai import ChatXAI
 from langchain.prompts import PromptTemplate
 from langchain.schema import BaseRetriever, Document
 from langchain.callbacks.streaming_stdout import StreamingStdOutCallbackHandler
 from typing import Union
 from loguru import logger
+from langchain_core.output_parsers import StrOutputParser
 
 from src.config import settings
 from src.utils.rate_limiter import rate_limiter, with_retry
@@ -68,6 +68,20 @@ Follow-Up Question: {question}
 
 Standalone Question:"""
 )
+def get_buffer_string(chat_memory):
+    """Minimal reimplementation for older LangChain versions."""
+    messages = getattr(chat_memory, "messages", [])
+    lines = []
+    for m in messages:
+        role = getattr(m, "type", getattr(m, "role", ""))
+        content = getattr(m, "content", str(m))
+        if role in ("human", "user"):
+            lines.append(f"Human: {content}")
+        elif role in ("ai", "assistant"):
+            lines.append(f"AI: {content}")
+        else:
+            lines.append(content)
+    return "\n".join(lines)
 
 
 class PPTQAChain:
@@ -118,27 +132,27 @@ class PPTQAChain:
                 )
                 self.provider = "openai"
             else:
-                # Use Anthropic
-                self.llm = ChatAnthropic(
-                    model=settings.answer_generation_model,
-                    api_key=settings.anthropic_api_key,
-                    max_tokens=2000,
-                    temperature=0.0,
-                    streaming=enable_streaming,
-                    callbacks=callbacks
-                )
-                self.provider = "anthropic"
-
-                # Use Grok
-                # self.llm = ChatXAI(
-                #     model = "grok-4-fast-reasoning",
-                #     api_key=settings.xai_api_key,
+                # # Use Anthropic
+                # self.llm = ChatAnthropic(
+                #     model=settings.answer_generation_model,
+                #     api_key=settings.anthropic_api_key,
                 #     max_tokens=2000,
                 #     temperature=0.0,
                 #     streaming=enable_streaming,
                 #     callbacks=callbacks
                 # )
-                # self.provider = "xai"
+                # self.provider = "anthropic"
+
+                # Use Grok
+                self.llm = ChatXAI(
+                    model = "grok-4-fast-reasoning",
+                    api_key=settings.xai_api_key,
+                    max_tokens=2000,
+                    temperature=0.0,
+                    streaming=enable_streaming,
+                    callbacks=callbacks
+                )
+                self.provider = "xai"
 
 
         # Initialize memory
@@ -150,16 +164,19 @@ class PPTQAChain:
                 output_key="answer"
             )
 
-        # Create chain
-        self.chain = ConversationalRetrievalChain.from_llm(
-            llm=self.llm,
-            retriever=self.retriever,
-            memory=self.memory,
-            combine_docs_chain_kwargs={"prompt": ANSWER_PROMPT},
-            condense_question_prompt=CONDENSE_QUESTION_PROMPT,
-            return_source_documents=True,
-            verbose=settings.verbose_logging
-        )
+        # # Create chain
+        # self.chain = ConversationalRetrievalChain.from_llm(
+        #     llm=self.llm,
+        #     retriever=self.retriever,
+        #     memory=self.memory,
+        #     combine_docs_chain_kwargs={"prompt": ANSWER_PROMPT},
+        #     condense_question_prompt=CONDENSE_QUESTION_PROMPT,
+        #     return_source_documents=True,
+        #     verbose=settings.verbose_logging,
+        # )
+        self._condense_prompt = CONDENSE_QUESTION_PROMPT
+        self._answer_prompt = ANSWER_PROMPT
+
 
         model_name = getattr(self.llm, 'model_name', getattr(self.llm, 'model', 'unknown'))
 
@@ -170,6 +187,62 @@ class PPTQAChain:
             f"quality_check={quality_check}, "
             f"caching={'enabled' if settings.enable_llm_cache else 'disabled'}"
         )
+    def _get_chat_history(self) -> str:
+        if not self.memory or not hasattr(self.memory, "chat_memory"):
+            return ""
+        try:
+            return get_buffer_string(self.memory.chat_memory)
+        except Exception:
+            # Fail-safe: return empty if memory backend differs
+            return ""
+
+    def _condense_question(self, user_input: str) -> str:
+        """Produce a standalone query from chat history + user question."""
+        chat_history = self._get_chat_history()
+        logger.warning(f"Chat history: {len(chat_history)} tokens")
+        msg = self._condense_prompt.format(
+            chat_history=chat_history,
+            question=user_input,
+        )
+        condensed = self.llm.invoke(msg)
+        return condensed.content
+
+    def _retrieve(self, standalone_query: str) -> List[Document]:
+        """Fetch relevant documents via the configured retriever."""
+        return self.retriever.get_relevant_documents(standalone_query)
+    
+    def _format_docs_as_context(self, docs: List[Document]) -> str:
+        """
+        Flatten retrieved docs into a single string with slide refs
+        for ANSWER_PROMPT's {context}. Prefer metadata['slide'],
+        otherwise fallback to 'page', 'source', then '?'.
+        """
+        parts: List[str] = []
+        for d in docs:
+            meta = getattr(d, "metadata", {}) or {}
+            slide = meta.get("slide") or meta.get("page") or meta.get("source") or "?"
+            pc = getattr(d, "page_content", "") or ""
+            parts.append(f"[Slide {slide}] {pc}")
+        return "\n\n".join(parts)
+
+    def _answer(self, standalone_query: str, docs: List[Document]) -> str:
+        """
+        Run ANSWER_PROMPT with required inputs:
+        - context: flattened string of retrieved docs (with slide refs)
+        - question: the standalone question
+        - chat_history: serialized chat history string
+        """
+        context = self._format_docs_as_context(docs)
+        chat_history = self._get_chat_history()
+        prompt_text = self._answer_prompt.format(
+            context=context,
+            question=standalone_query,
+            chat_history=chat_history,
+        )
+
+        out = self.llm.invoke(prompt_text)
+        return out.content
+
 
     @with_retry(max_attempts=3)
     async def aquery(
@@ -196,11 +269,23 @@ class PPTQAChain:
 
         try:
             # Run chain
-            result = await self.chain.ainvoke({"question": question})
+            standalone = self._condense_question(question)
 
-            # Extract answer and sources
-            answer = result.get("answer", "")
-            source_docs = result.get("source_documents", []) if return_sources else []
+            logger.debug(f"[Standalone Question] : {standalone}")
+
+            source_docs = self._retrieve(standalone)
+            if not source_docs:
+                source_docs = []
+    
+            logger.debug(f"[Retrieved {len(source_docs)} docs]")
+            for i, d in enumerate(source_docs, 1):
+                logger.debug(f"Doc {i}: {d.page_content[:100]}")
+
+            answer = self._answer(standalone, source_docs)
+
+            if self.memory:
+                self.memory.chat_memory.add_user_message(question)
+                self.memory.chat_memory.add_ai_message(answer)
 
             # Quality check
             if self.quality_check:

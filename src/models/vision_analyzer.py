@@ -177,14 +177,14 @@ Summary:
             logger.error(f"Table analysis failed: {e}")
             return {"error": str(e)}
 
-    def _parse_chart_analysis(self, text: str) -> Dict:
-        """Parse structured analysis from LLM response (legacy format)."""
-        return {
-            "type": self._extract_section(text, "Type"),
-            "data": self._extract_section(text, "Data"),
-            "insights": self._extract_section(text, "Insights"),
-            "text": self._extract_section(text, "Text")
-        }
+    # def _parse_chart_analysis(self, text: str) -> Dict:
+    #     """Parse structured analysis from LLM response (legacy format)."""
+    #     return {
+    #         "type": self._extract_section(text, "Type"),
+    #         "data": self._extract_section(text, "Data"),
+    #         "insights": self._extract_section(text, "Insights"),
+    #         "text": self._extract_section(text, "Text")
+    #     }
 
     # def _parse_comprehensive_analysis(self, text: str) -> Dict:
     #     """
@@ -306,49 +306,3 @@ Summary:
             logger.debug(f"Saved image to: {image_path}")
         
         return vision_description
-
-# Convenience function
-async def analyze_ppt_images(
-    ppt_path: str,
-    slides_to_analyze: Optional[List[int]] = None
-) -> Dict[int, List[Dict]]:
-    """
-    Analyze images in PPT slides.
-
-    Args:
-        ppt_path: Path to PPT file
-        slides_to_analyze: List of slide numbers to analyze (None = all)
-
-    Returns:
-        Dict mapping slide numbers to image analyses
-    """
-    analyzer = VisionAnalyzer()
-    prs = Presentation(ppt_path)
-
-    if slides_to_analyze is None:
-        slides_to_analyze = list(range(1, len(prs.slides) + 1))
-
-    results = {}
-
-    for slide_num in slides_to_analyze:
-        slide = prs.slides[slide_num - 1]
-
-        # Build context
-        slide_context = {
-            "slide_number": slide_num,
-            "total_slides": len(prs.slides),
-            "slide_title": slide.shapes.title.text if slide.shapes.title else "",
-            "section": "Main Content"  # Would need section detection
-        }
-
-        # Analyze images
-        analyses = await analyzer.analyze_slide_images(
-            ppt_path,
-            slide_num,
-            slide_context
-        )
-
-        if analyses:
-            results[slide_num] = analyses
-
-    return results

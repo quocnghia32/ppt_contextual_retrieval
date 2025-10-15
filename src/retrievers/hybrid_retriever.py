@@ -37,8 +37,8 @@ class HybridRetriever(BaseRetriever):
         self,
         vector_store: PineconeVectorStore,
         documents: List[Document],
-        vector_weight: float = 0.7,
-        bm25_weight: float = 0.3,
+        vector_weight: float = 0.6,
+        bm25_weight: float = 0.4,
         top_k: int = None,
         **kwargs
     ):
@@ -101,6 +101,14 @@ class HybridRetriever(BaseRetriever):
             f"Retrieved {len(merged_docs)} documents: "
             f"{len(vector_docs)} from vector, {len(bm25_docs)} from BM25"
         )
+        for doc in merged_docs:
+            #Get the score and content
+            score = doc.metadata["rrf_score"]
+            vector_rank = doc.metadata["vector_rank"]
+            bm25_rank = doc.metadata["bm25_rank"]
+            content = doc.page_content
+
+            logger.debug(f"Score: {score}, Vector Rank: {vector_rank}, BM25 Rank: {bm25_rank}, Content: {content[:100]}")
 
         return merged_docs[:self.top_k]
 
@@ -109,7 +117,7 @@ class HybridRetriever(BaseRetriever):
         vector_docs: List[Document],
         bm25_docs: List[Document],
         query: str,
-        k: int = 60
+        k: int = 12
     ) -> List[Document]:
         """
         Merge results using Reciprocal Rank Fusion.
@@ -182,6 +190,7 @@ class HybridRetriever(BaseRetriever):
 
         # Fallback: create ID from content hash
         import hashlib
+        logger.error("No chunk_id found in metadata, creating one from content hash")
         content_hash = hashlib.md5(doc.page_content.encode()).hexdigest()[:12]
         return f"doc_{content_hash}"
 

@@ -128,7 +128,6 @@ Context:"""
             f"chunk_size={self.chunk_size}, add_context={self.add_context}, "
             f"caching={'enabled' if settings.enable_llm_cache else 'disabled'}"
         )
-
     def split_text(self, text: str) -> List[str]:
         """
         Split text into chunks.
@@ -137,14 +136,13 @@ Context:"""
         Returns list of text chunks without context.
         """
         return self._split_text(text)
-
-    def split_documents(self, documents: List[Document]) -> List[Document]:
+    def split_documents(self, all_doc_text: str, documents: List[Document]) -> List[Document]:
         """
         Split documents into chunks and add context.
 
         This is a synchronous wrapper around async implementation.
         """
-        return asyncio.run(self.asplit_documents(documents))
+        return asyncio.run(self.asplit_documents(all_doc_text, documents))
 
     async def asplit_documents(self, all_doc_text: str, documents: List[Document]) -> List[Document]:
         """
