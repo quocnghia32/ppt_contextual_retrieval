@@ -11,11 +11,19 @@ class Settings(BaseSettings):
     """Application settings loaded from environment variables."""
 
     # API Keys
-    anthropic_api_key: str = Field(..., env="ANTHROPIC_API_KEY")
     openai_api_key: str = Field(..., env="OPENAI_API_KEY")
     pinecone_api_key: str = Field(..., env="PINECONE_API_KEY")
     cohere_api_key: Optional[str] = Field(None, env="COHERE_API_KEY")
     xai_api_key: str = Field(..., env="XAI_API_KEY")
+
+    # Azure Configuration
+    azure_openai_api_key: str = Field(..., env="AZURE_OPENAI_API_KEY")
+    azure_openai_endpoint: str = Field(..., env="AZURE_OPENAI_ENDPOINT")
+    azure_openai_embedding_deployment: str = Field(..., env="AZURE_OPENAI_EMBEDDING_DEPLOYMENT")
+    azure_openai_api_version_embedding: str = Field(..., env="AZURE_OPENAI_API_VERSION_EMBEDDING")
+    azure_openai_chat_deployment: str = Field(..., env="AZURE_OPENAI_CHAT_DEPLOYMENT")
+    azure_openai_api_version_chat: str = Field(..., env="AZURE_OPENAI_API_VERSION_CHAT")
+
 
     # Pinecone Configuration
     pinecone_environment: str = Field("us-east-1", env="PINECONE_ENVIRONMENT")
@@ -34,13 +42,13 @@ class Settings(BaseSettings):
     # Model Configuration
     embedding_model: str = Field("text-embedding-3-small", env="EMBEDDING_MODEL")
 
-    # Context generation: OpenAI or Anthropic
-    context_generation_provider: str = Field("openai", env="CONTEXT_GENERATION_PROVIDER")  # "openai" or "anthropic"
-    context_generation_model: str = Field("gpt-4o-mini", env="CONTEXT_GENERATION_MODEL")  # OpenAI: gpt-4o-mini, gpt-4o, gpt-3.5-turbo | Anthropic: claude-3-haiku
+    # Context generation: OpenAI
+    context_generation_provider: str = Field("openai", env="CONTEXT_GENERATION_PROVIDER")  # "openai"
+    context_generation_model: str = Field("gpt-4o-mini", env="CONTEXT_GENERATION_MODEL")  # OpenAI: gpt-4o-mini, gpt-4o, gpt-3.5-turbo
 
-    # Answer generation: OpenAI or Anthropic
-    answer_generation_provider: str = Field("openai", env="ANSWER_GENERATION_PROVIDER")  # "openai" or "anthropic"
-    answer_generation_model: str = Field("gpt-4o", env="ANSWER_GENERATION_MODEL")  # OpenAI: gpt-4o, gpt-4-turbo, gpt-3.5-turbo | Anthropic: claude-3-sonnet
+    # Answer generation: OpenAI
+    answer_generation_provider: str = Field("openai", env="ANSWER_GENERATION_PROVIDER")  # "openai"
+    answer_generation_model: str = Field("gpt-4o", env="ANSWER_GENERATION_MODEL")  # OpenAI: gpt-4o, gpt-4-turbo, gpt-3.5-turbo
 
     # Vision model (OpenAI only)
     vision_model: str = Field("gpt-4o-mini", env="VISION_MODEL")  # gpt-4o-mini, gpt-4o, gpt-4-turbo

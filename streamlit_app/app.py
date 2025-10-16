@@ -106,7 +106,7 @@ def main():
 
         # Rate limit stats
         st.markdown("### 📈 Rate Limits")
-        stats = rate_limiter.get_stats("anthropic")
+        stats = rate_limiter.get_stats("openai_vision")
         col1, col2 = st.columns(2)
         with col1:
             st.metric("Requests", f"{stats['requests_in_last_minute']}/50")
@@ -397,8 +397,8 @@ def show_stats_page():
     col1, col2 = st.columns(2)
 
     with col1:
-        st.markdown("#### Anthropic (Claude)")
-        stats = rate_limiter.get_stats("anthropic")
+        st.markdown("#### OpenAI hehe")
+        stats = rate_limiter.get_stats("openai_vision")
         st.json(stats)
 
     with col2:

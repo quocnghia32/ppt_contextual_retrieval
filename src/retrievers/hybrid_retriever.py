@@ -150,7 +150,6 @@ class HybridRetriever(BaseRetriever):
         for rank, doc in enumerate(bm25_docs, start=1):
             doc_id = self._get_doc_id(doc)
             bm25_score = self.bm25_weight * (1.0 / (k + rank))
-
             if doc_id in doc_scores:
                 doc_scores[doc_id]["score"] += bm25_score
                 doc_scores[doc_id]["bm25_rank"] = rank

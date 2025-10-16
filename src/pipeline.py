@@ -20,7 +20,9 @@ from src.splitters.contextual_splitter import ContextualTextSplitter
 from src.models.vision_analyzer import VisionAnalyzer
 from src.retrievers.hybrid_retriever import create_hybrid_retriever
 from src.chains.qa_chain import create_qa_chain
-from src.utils.caching import get_cached_embeddings, caching_manager
+#from src.utils.caching import get_cached_embeddings
+from src.utils.caching_azure import get_cached_embeddings_azure
+
 
 
 class PPTContextualRetrievalPipeline:
@@ -53,7 +55,7 @@ class PPTContextualRetrievalPipeline:
         self.use_reranking = use_reranking
 
         # Initialize components with caching
-        self.embeddings = get_cached_embeddings(model=settings.embedding_model)
+        self.embeddings = get_cached_embeddings_azure(model=settings.embedding_model)
 
         # Storage
         self.documents = []
@@ -163,7 +165,7 @@ class PPTContextualRetrievalPipeline:
 
                 pc.create_index(
                     name=self.index_name,
-                    dimension=1536,  # text-embedding-3-small dimension
+                    dimension=(1536 if settings.embedding_model == "text-embedding-3-small" else 3072),  # text-embedding-3-small or large dimension
                     metric="cosine",
                     spec=ServerlessSpec(
                         cloud="aws",

@@ -74,8 +74,8 @@ class PPTLoader(BaseLoader):
                 page_content=self._extract_ppt_info(prs),
                 metadata={"source": self.file_path,
                           "slide_number": 0,
-                          
-                          }
+                          "chunk_id": f"{presentation_id}_0_0",
+                        }
             )
 
             for slide_idx, slide in enumerate(prs.slides):
@@ -124,10 +124,10 @@ class PPTLoader(BaseLoader):
                     "section": section,
                     "speaker_notes": speaker_notes,
                     "image_count": len(images_info),
-                    "images": json.dumps(images_info),  # Convert to JSON string
+                    #"images": json.dumps(images_info),  # Convert to JSON string
                     "chart_count": len(charts_info),
                     "charts": json.dumps(charts_info),  # Convert to JSON string
-                    "table_count": len(tables_info),
+                    #"table_count": len(tables_info),
                     "tables": json.dumps(tables_info),  # Convert to JSON string
                     "type": "slide"
                 }

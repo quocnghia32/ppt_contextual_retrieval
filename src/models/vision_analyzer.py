@@ -34,11 +34,19 @@ class VisionAnalyzer:
             model: Vision model to use (default: from settings)
         """
         self.model_name = model or settings.vision_model
-        self.llm = ChatOpenAI(
-            model=self.model_name,
-            api_key=settings.openai_api_key,
-            max_tokens=1000,  # Increased for comprehensive analysis with OCR
-            temperature=0.0  # Deterministic
+        # self.llm = ChatOpenAI(
+        #     model=self.model_name,
+        #     api_key=settings.openai_api_key,
+        #     max_tokens=1000,  # Increased for comprehensive analysis with OCR
+        #     temperature=0.0  # Deterministic
+        # )
+        from langchain_openai import AzureChatOpenAI
+        self.llm = AzureChatOpenAI(
+            azure_endpoint="https://momo-wealth-management.openai.azure.com/",
+            api_key=settings.azure_openai_api_key,
+            azure_deployment=self.model_name,
+            api_version="2024-08-01-preview",
+            temperature=0.0
         )
         logger.info(f"Vision analyzer initialized with model: {self.model_name}")
 

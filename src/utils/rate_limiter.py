@@ -82,7 +82,7 @@ class RateLimiter:
         Wait if rate limit would be exceeded.
 
         Args:
-            key: Rate limit key (e.g., "anthropic", "openai")
+            key: Rate limit key (e.g., "openai")
             estimated_tokens: Estimated tokens for this request
         """
         state = self._get_state(key)

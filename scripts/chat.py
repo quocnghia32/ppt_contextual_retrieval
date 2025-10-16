@@ -57,12 +57,13 @@ class ChatSession:
 
         # Setup retrieval without indexing
         from langchain_pinecone import PineconeVectorStore
-        from src.utils.caching import get_cached_embeddings
+        #from src.utils.caching import get_cached_embeddings
+        from src.utils.caching_azure import get_cached_embeddings_azure
         from src.retrievers.hybrid_retriever import create_hybrid_retriever
         from src.chains.qa_chain import create_qa_chain
 
         # Connect to vector store
-        embeddings = get_cached_embeddings(model=settings.embedding_model)
+        embeddings = get_cached_embeddings_azure(model=settings.embedding_model)
         vector_store = PineconeVectorStore(
             index_name=self.index_name,
             embedding=embeddings,

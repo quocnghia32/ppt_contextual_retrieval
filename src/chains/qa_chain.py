@@ -5,8 +5,7 @@ Uses Claude for answer generation with quality checking.
 """
 from typing import List, Dict, Optional, Any
 from langchain.memory import ConversationBufferMemory
-from langchain_anthropic import ChatAnthropic
-from langchain_openai import ChatOpenAI
+from langchain_openai import AzureChatOpenAI, ChatOpenAI
 from langchain_xai import ChatXAI
 from langchain.prompts import PromptTemplate
 from langchain.schema import BaseRetriever, Document
@@ -18,6 +17,8 @@ from langchain_core.output_parsers import StrOutputParser
 from src.config import settings
 from src.utils.rate_limiter import rate_limiter, with_retry
 from src.utils.caching import get_cached_llm
+from src.utils.caching_azure import get_cached_llm_azure
+
 
 
 # Answer generation prompt (Optimized for OpenAI caching)
@@ -94,7 +95,7 @@ class PPTQAChain:
     def __init__(
         self,
         retriever: BaseRetriever,
-        llm: Optional[Union[ChatAnthropic, ChatOpenAI]] = None,
+        llm: Optional[Union[ChatXAI, AzureChatOpenAI, ChatOpenAI]] = None,
         enable_streaming: bool = False,
         enable_memory: bool = True,
         quality_check: bool = True
@@ -104,7 +105,7 @@ class PPTQAChain:
 
         Args:
             retriever: Document retriever (hybrid retriever)
-            llm: Language model for answer generation (OpenAI or Anthropic)
+            llm: Language model for answer generation (OpenAI)
             enable_streaming: Enable token-by-token streaming
             enable_memory: Enable conversation memory
             quality_check: Enable answer quality checking
@@ -114,7 +115,7 @@ class PPTQAChain:
         self.enable_memory = enable_memory
         self.quality_check = quality_check
 
-        # Initialize LLM (OpenAI or Anthropic)
+        # Initialize LLM (OpenAI)
         callbacks = [StreamingStdOutCallbackHandler()] if enable_streaming else None
 
         if llm:
@@ -131,18 +132,19 @@ class PPTQAChain:
                     callbacks=callbacks
                 )
                 self.provider = "openai"
-            else:
-                # # Use Anthropic
-                # self.llm = ChatAnthropic(
-                #     model=settings.answer_generation_model,
-                #     api_key=settings.anthropic_api_key,
-                #     max_tokens=2000,
-                #     temperature=0.0,
-                #     streaming=enable_streaming,
-                #     callbacks=callbacks
-                # )
-                # self.provider = "anthropic"
+            elif settings.answer_generation_provider == "azure":
+                # Use Azure OpenAI LLM
+                self.llm = AzureChatOpenAI(
+                    api_key=settings.azure_openai_api_key,
+                    azure_endpoint=settings.azure_openai_endpoint,
+                    api_version=settings.azure_openai_api_version_chat,
+                    azure_deployment=settings.azure_openai_chat_deployment,
+                    temperature=0.0,
+                    max_tokens=200,
+                )
 
+                self.provider = "azure"
+            else:
                 # Use Grok
                 self.llm = ChatXAI(
                     model = "grok-4-fast-reasoning",
@@ -263,7 +265,7 @@ class PPTQAChain:
         # Rate limiting
         estimated_tokens = rate_limiter.count_tokens(question) + 1000
         await rate_limiter.wait_if_needed(
-            key="anthropic",
+            key="openai",
             estimated_tokens=estimated_tokens
         )
 
@@ -397,7 +399,7 @@ class StreamingPPTQAChain(PPTQAChain):
         # Rate limiting
         estimated_tokens = rate_limiter.count_tokens(question) + 1000
         await rate_limiter.wait_if_needed(
-            key="anthropic",
+            key="openai",
             estimated_tokens=estimated_tokens
         )
 

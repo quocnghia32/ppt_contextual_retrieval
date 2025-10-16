@@ -1,12 +1,11 @@
 """
 Contextual Text Splitter with LLM-generated context.
 
-Implements the core Contextual Retrieval approach from Anthropic.
+Implements the core Contextual Retrieval approach.
 """
 from langchain.text_splitter import TextSplitter
 from langchain.schema import Document
-from langchain_anthropic import ChatAnthropic
-from langchain_openai import ChatOpenAI
+from langchain_openai import AzureChatOpenAI, ChatOpenAI
 from langchain.prompts import PromptTemplate
 from typing import List, Optional, Union
 import asyncio
@@ -15,6 +14,7 @@ from loguru import logger
 from src.config import settings
 from src.utils.rate_limiter import rate_limiter, with_retry
 from src.utils.caching import get_cached_llm
+from src.utils.caching_azure import get_cached_llm_azure
 
 
 class ContextualTextSplitter(TextSplitter):
@@ -26,7 +26,7 @@ class ContextualTextSplitter(TextSplitter):
 
     def __init__(
         self,
-        llm: Optional[Union[ChatAnthropic, ChatOpenAI]] = None,
+        llm: Optional[Union[AzureChatOpenAI, ChatOpenAI]] = None,
         chunk_size: int = None,
         chunk_overlap: int = None,
         add_context: bool = True,
@@ -50,7 +50,7 @@ class ContextualTextSplitter(TextSplitter):
         self.add_context = add_context
         self.batch_size = batch_size
 
-        # Initialize LLM for context generation (OpenAI or Anthropic)
+        # Initialize LLM for context generation (OpenAI)
         if llm:
             self.llm = llm
         else:
@@ -63,14 +63,12 @@ class ContextualTextSplitter(TextSplitter):
                 )
                 self.provider = "openai"
             else:
-                # Use Anthropic
-                self.llm = ChatAnthropic(
-                    model=settings.context_generation_model,
-                    api_key=settings.anthropic_api_key,
-                    max_tokens=150,
-                    temperature=0.0
+                self.llm = get_cached_llm_azure(
+                    model=settings.context_generation_model, # not used
+                    max_tokens=150,  # Context should be 50-100 tokens
+                    temperature=0.0  # Deterministic
                 )
-                self.provider = "anthropic"
+                self.provider = "azure"
 
         # Context generation prompt (Optimized for OpenAI caching)
         # Static instructions first (will be cached), dynamic content last
@@ -161,7 +159,7 @@ Context:"""
 
             # Create chunk documents
             chunks = []
-            for chunk_idx, chunk_text in enumerate(text_chunks):
+            for chunk_idx, chunk_text in enumerate(text_chunks,1):
                 chunk_metadata = {
                     **doc.metadata,
                     "chunk_index": chunk_idx,
@@ -243,7 +241,7 @@ Context:"""
         """
         # Rate limiting
         await rate_limiter.wait_if_needed(
-            key="anthropic",
+            key="openai",
             estimated_tokens=rate_limiter.count_tokens(chunk["text"])
         )
 
@@ -263,7 +261,7 @@ Context:"""
                 all_slides_content=all_doc_text,
                 section=metadata.get("section", "Unknown"),
                 slide_title=metadata.get("slide_title", ""),
-                chunk_content=chunk["text"][:500],  # Limit input size
+                chunk_content=chunk["text"][:2000],  # Limit input size
                 prev_slide_title=prev_slide,
                 next_slide_title=next_slide
             )
