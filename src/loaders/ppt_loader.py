@@ -65,25 +65,25 @@ class PPTLoader(BaseLoader):
             logger.info(f"Loading presentation: {title} ({len(prs.slides)} slides)")
 
             # Detect sections (if any)
-            sections = self._detect_sections(prs)
-
-            logger.info(f"Detected {len(sections)} sections")
-           
-            # Add a overall information document about current file
-            overall_info = Document(
-                page_content=self._extract_ppt_info(prs),
-                metadata={"source": self.file_path,
-                          "slide_number": 0,
-                          "chunk_id": f"{presentation_id}_0_0",
-                        }
-            )
+            sections = []
 
             for slide_idx, slide in enumerate(prs.slides):
                 slide_num = slide_idx + 1
 
+                # Extract all shape (parse group nested case)
+                #shapes = list(self._extract_shapes(slide))
+                shapes = list(slide.shapes)
+
                 # Extract slide content
-                slide_text = self._extract_slide_text(slide)
+                slide_text = self._extract_slide_text(shapes)
                 slide_title = self._extract_slide_title(slide)
+
+                # List off overall sections
+                if self._detect_section(slide_title, slide_text):
+                    sections.append({
+                        "title": slide_text,
+                        "start_slide": slide_num
+                    })
 
                 # Extract speaker notes
                 speaker_notes = ""
@@ -96,20 +96,20 @@ class PPTLoader(BaseLoader):
                 # Extract images
                 images_info = []
                 if self.extract_images:
-                    images_info = await self._extract_images_info(slide, slide_num)
+                    images_info = await self._extract_images_info(shapes, slide_num)
 
 
                 # Extract charts
                 charts_info = []
                 if self.extract_images:
-                    charts_info = self._extract_charts_info(slide, slide_num)
+                    charts_info = self._extract_charts_info(shapes, slide_num)
 
                 # Extract tables
                 tables_info = []
                 if self.extract_tables:
-                    tables_info = self._extract_tables(slide)
+                    tables_info = self._extract_tables(shapes)
 
-                # Determine section
+                # Determine section for this slide
                 section = self._get_section_for_slide(slide_num, sections, prs)
 
                 # Build comprehensive metadata
@@ -147,6 +147,16 @@ class PPTLoader(BaseLoader):
                 )
                 documents.append(doc)
 
+            logger.info(f"Detected {len(sections)} sections")
+            # Add a overall information document about current file
+            overall_info = Document(
+                page_content=self._extract_ppt_info(prs,title,sections),
+                metadata={"source": self.file_path,
+                          "slide_number": 0,
+                          "chunk_id": f"{presentation_id}_0_0",
+                        }
+            )
+
             logger.info(f"Successfully loaded {len(documents)} slides")
             return documents, overall_info
 
@@ -154,7 +164,18 @@ class PPTLoader(BaseLoader):
             logger.error(f"Failed to load PPT {self.file_path}: {e}")
             raise
 
-    def _extract_ppt_info(self, prs: Presentation) -> str:
+    def _extract_shapes(self, container):
+        """
+        Yield all shapes in a slide or group recursively.
+        Works for slide-level containers and group shapes.
+        """
+        for shape in container.shapes:
+            yield shape
+            if shape.shape_type == MSO_SHAPE_TYPE.GROUP:
+                # recurse into child shapes of the group
+                yield from self._extract_shapes(shape)
+
+    def _extract_ppt_info(self, prs: Presentation, title, sections) -> str:
         """
         Extracts simple overall information from a PPTX presentation.
         Includes file name, total slides, section names, and slide titles.
@@ -163,23 +184,14 @@ class PPTLoader(BaseLoader):
         total_slides = len(prs.slides)
         file_name = os.path.basename(self.file_path)
 
-        title = props.title or file_name
         author = props.author or "Unknown author"
         created = props.created.strftime("%Y-%m-%d") if props.created else "Unknown"
         modified = props.modified.strftime("%Y-%m-%d") if props.modified else "Unknown"
 
         # --- Try to get section names ---
-        # python-pptx doesn’t expose sections directly, but you can read them via the underlying XML
         section_names = []
-        try:
-            sldIdLst = prs.part.element.xpath("//p:sldIdLst/p:sldId")
-            sections = prs.part.element.xpath("//p:sectionLst/p:section")
-            for s in sections:
-                name = s.get("name")
-                if name:
-                    section_names.append(name)
-        except Exception:
-            section_names = []
+        for section in sections:
+            section_names.append(section["title"])
 
         # --- Slide titles ---
         slide_titles = []
@@ -227,22 +239,24 @@ class PPTLoader(BaseLoader):
             pass
         return ""
 
-    def _extract_slide_text(self, slide) -> str:
+    def _extract_slide_text(self, shapes) -> str:
         """Extract all text content from slide."""
         text_parts = []
 
-        for shape in slide.shapes:
+        for shape in shapes:
             if hasattr(shape, "text") and shape.text.strip():
                 text_parts.append(shape.text.strip())
 
         return "\n\n".join(text_parts)
     
-    def _extract_charts_info(self, slide, slide_num: int) -> List[dict]:
+    def _extract_charts_info(self, shapes, slide_num: int) -> List[dict]:
         """Extract chart data from slide."""
         charts = []
 
-        for shape_idx, shape in enumerate(slide.shapes):
+        for shape_idx, shape in enumerate(shapes):
             if shape.shape_type == MSO_SHAPE_TYPE.CHART:
+                logger.warning(f"Found chart on slide {slide_num}")
+                logger.warning(f"Content: {str(shape)}")
                 charts.append({
                     "slide_number": slide_num,
                     "shape_index": shape_idx,
@@ -252,7 +266,7 @@ class PPTLoader(BaseLoader):
 
         return charts
 
-    async def _extract_images_info(self, slide, slide_num: int) -> List[dict]:
+    async def _extract_images_info(self, shapes, slide_num: int) -> List[dict]:
         """
         Extract information about images in slide.
         """
@@ -265,8 +279,9 @@ class PPTLoader(BaseLoader):
         #             - Total Slides: {slide_context.get('total_slides', 'Unknown')}
         #             """
         success_count = 0
-
-        for shape_idx, shape in enumerate(slide.shapes):
+        #logger.debug(f"Extracting SHAPE from slide {slide_num}")
+        for shape_idx, shape in enumerate(shapes):
+            #logger.info(f"SHAPE of {shape_idx} is {shape.shape_type}")
             if shape.shape_type == MSO_SHAPE_TYPE.PICTURE:
                 try:
                     image = shape.image
@@ -304,11 +319,11 @@ class PPTLoader(BaseLoader):
         logger.debug(f"Analyzed {success_count} images in slide {slide_num}")
         return images
 
-    def _extract_tables(self, slide) -> List[dict]:
+    def _extract_tables(self, shapes) -> List[dict]:
         """Extract table data from slide."""
         tables = []
 
-        for shape in slide.shapes:
+        for shape in shapes:
             if shape.shape_type == MSO_SHAPE_TYPE.TABLE:
                 try:
                     table = shape.table
@@ -331,42 +346,31 @@ class PPTLoader(BaseLoader):
 
         return tables
 
-    def _detect_sections(self, prs: Presentation) -> List[dict]:
+    def _detect_section(self, title, text) -> bool:
         """
         Detect section boundaries based on slide titles.
 
         Simple heuristic: Look for slides that look like section headers.
         """
-        sections = []
-
         section_keywords = [
             "introduction", "overview", "agenda",
             "background", "conclusion", "summary",
             "results", "analysis", "recommendations"
         ]
+        # Check if this looks like a section header
+        is_section_header = False
 
-        for idx, slide in enumerate(prs.slides):
-            title = self._extract_slide_title(slide).lower()
+        # Heuristic 1: Contains section keywords
+        title_lower = title.lower()
+        if any(keyword in title_lower for keyword in section_keywords):
+            is_section_header = True
 
-            # Check if this looks like a section header
-            is_section_header = False
+        # Heuristic 2: Slide has only title (section divider)
+        if title and len(text.split()) < 20:  # Very short content
+            is_section_header = True
 
-            # Heuristic 1: Contains section keywords
-            if any(keyword in title for keyword in section_keywords):
-                is_section_header = True
-
-            # Heuristic 2: Slide has only title (section divider)
-            text = self._extract_slide_text(slide)
-            if title and len(text.split()) < 20:  # Very short content
-                is_section_header = True
-
-            if is_section_header:
-                sections.append({
-                    "title": self._extract_slide_title(slide),
-                    "start_slide": idx + 1
-                })
-
-        return sections
+        return is_section_header
+        
 
     def _get_section_for_slide(
         self,

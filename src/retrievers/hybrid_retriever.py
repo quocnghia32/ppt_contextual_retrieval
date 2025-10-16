@@ -274,7 +274,7 @@ class ContextualHybridRetriever(HybridRetriever):
         if self.use_reranking and self.reranker:
             try:
                 docs = self.reranker.compress_documents(docs, query)
-                logger.debug(f"Reranked to {len(docs)} documents")
+                logger.info(f"Reranked to {len(docs)} documents")
             except Exception as e:
                 logger.warning(f"Reranking failed: {e}, using hybrid results")
 

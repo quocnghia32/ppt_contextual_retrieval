@@ -279,7 +279,7 @@ class PPTQAChain:
             if not source_docs:
                 source_docs = []
     
-            logger.debug(f"[Retrieved {len(source_docs)} docs]")
+            logger.info(f"[Retrieved {len(source_docs)} docs]")
             for i, d in enumerate(source_docs, 1):
                 logger.debug(f"Doc {i}: {d.page_content[:100]}")
 

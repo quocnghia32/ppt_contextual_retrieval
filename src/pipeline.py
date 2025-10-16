@@ -131,7 +131,7 @@ class PPTContextualRetrievalPipeline:
 
         # Step 5: Index chunks
         logger.info("Step 5/5: Indexing chunks to Pinecone...")
-        await self._index_chunks()
+        #await self._index_chunks()
 
         # Create retriever and QA chain
         self._setup_retrieval()

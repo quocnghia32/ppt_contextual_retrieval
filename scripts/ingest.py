@@ -270,7 +270,7 @@ Note:
 
 
 if __name__ == '__main__':
-    file_path = "data/presentations/Cinema - Desk - Community.pptx"
+    file_path = "data/presentations/ITPM_Scrum_Training.pptx"
     result = asyncio.run(ingest_single_file(file_path))
 
     print("\n" + "="*60)

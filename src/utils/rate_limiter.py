@@ -96,7 +96,8 @@ class RateLimiter:
             wait_time = 60 - (now - oldest_request)
             if wait_time > 0:
                 logger.info(f"Rate limit reached for {key}, waiting {wait_time:.1f}s")
-                await asyncio.sleep(wait_time + 0.1)
+                #await asyncio.sleep(wait_time + 0.1)
+                await asyncio.sleep(1)
                 self._clean_old_entries(state)
 
         # Check token limit
@@ -111,7 +112,8 @@ class RateLimiter:
                         logger.info(
                             f"Token limit reached for {key}, waiting {wait_time:.1f}s"
                         )
-                        await asyncio.sleep(wait_time + 0.1)
+                        #await asyncio.sleep(wait_time + 0.1)
+                        await asyncio.sleep(1)
                         self._clean_old_entries(state)
 
         # Record this request
