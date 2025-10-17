@@ -6,7 +6,12 @@ Uses Claude for answer generation with quality checking.
 from typing import List, Dict, Optional, Any
 from langchain.memory import ConversationBufferMemory
 from langchain_openai import AzureChatOpenAI, ChatOpenAI
-from langchain_xai import ChatXAI
+try:
+    from langchain_xai import ChatXAI
+    HAS_XAI = True
+except ImportError:
+    ChatXAI = None
+    HAS_XAI = False
 from langchain.prompts import PromptTemplate
 from langchain.schema import BaseRetriever, Document
 from langchain.callbacks.streaming_stdout import StreamingStdOutCallbackHandler
@@ -95,7 +100,7 @@ class PPTQAChain:
     def __init__(
         self,
         retriever: BaseRetriever,
-        llm: Optional[Union[ChatXAI, AzureChatOpenAI, ChatOpenAI]] = None,
+        llm: Optional[Any] = None,  # Union[ChatXAI, AzureChatOpenAI, ChatOpenAI]
         enable_streaming: bool = False,
         enable_memory: bool = True,
         quality_check: bool = True
@@ -145,7 +150,12 @@ class PPTQAChain:
 
                 self.provider = "azure"
             else:
-                # Use Grok
+                # Use Grok (requires langchain-xai)
+                if not HAS_XAI:
+                    raise ImportError(
+                        "langchain-xai is required for XAI provider. "
+                        "Install it with: pip install langchain-xai"
+                    )
                 self.llm = ChatXAI(
                     model = "grok-4-fast-reasoning",
                     api_key=settings.xai_api_key,

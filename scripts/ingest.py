@@ -61,8 +61,7 @@ async def ingest_single_file(
     # Create pipeline (uses index from .env)
     pipeline = PPTContextualRetrievalPipeline(
         use_contextual=use_contextual,
-        use_vision=use_vision,
-        use_reranking=use_reranking
+        use_vision=use_vision
     )
 
     # Index presentation

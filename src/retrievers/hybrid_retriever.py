@@ -36,10 +36,11 @@ class HybridRetriever(BaseRetriever):
     def __init__(
         self,
         vector_store: PineconeVectorStore,
-        documents: List[Document],
+        documents: List[Document] = None,
         vector_weight: float = 0.6,
         bm25_weight: float = 0.4,
         top_k: int = None,
+        bm25_retriever: Any = None,
         **kwargs
     ):
         """
@@ -47,22 +48,36 @@ class HybridRetriever(BaseRetriever):
 
         Args:
             vector_store: Pinecone vector store
-            documents: All documents for BM25 index
+            documents: All documents for BM25 index (if bm25_retriever not provided)
             vector_weight: Weight for vector search (default: 0.7)
             bm25_weight: Weight for BM25 search (default: 0.3)
             top_k: Number of results to return
+            bm25_retriever: Pre-built BM25 retriever (optional, overrides documents)
         """
         super().__init__(
             vector_store=vector_store,
             vector_weight=vector_weight,
             bm25_weight=bm25_weight,
             top_k=top_k or settings.top_k_retrieval,
+            bm25_retriever=bm25_retriever,
             **kwargs
         )
 
         # Initialize BM25 retriever
-        self.bm25_retriever = BM25Retriever.from_documents(documents)
-        self.bm25_retriever.k = self.top_k
+        if bm25_retriever is not None:
+            # Use provided BM25 retriever (from abstraction layer)
+            self.bm25_retriever = bm25_retriever
+            self.bm25_retriever.k = self.top_k
+            logger.info("Using provided BM25 retriever (abstraction layer)")
+        elif documents:
+            # Build BM25 from documents (backward compatibility)
+            self.bm25_retriever = BM25Retriever.from_documents(documents)
+            self.bm25_retriever.k = self.top_k
+            logger.info("Built BM25 retriever from documents (legacy mode)")
+        else:
+            raise ValueError(
+                "Either bm25_retriever or documents must be provided"
+            )
 
         logger.info(
             f"HybridRetriever initialized: "
@@ -222,9 +237,10 @@ class ContextualHybridRetriever(HybridRetriever):
     def __init__(
         self,
         vector_store: PineconeVectorStore,
-        documents: List[Document],
+        documents: List[Document] = None,
         use_reranking: bool = True,
         reranker_model: str = None,
+        bm25_retriever: Any = None,
         **kwargs
     ):
         """
@@ -232,13 +248,15 @@ class ContextualHybridRetriever(HybridRetriever):
 
         Args:
             vector_store: Pinecone vector store with contextual embeddings
-            documents: Contextual documents
+            documents: Contextual documents (if bm25_retriever not provided)
             use_reranking: Whether to use Cohere reranking
             reranker_model: Reranker model name
+            bm25_retriever: Pre-built BM25 retriever (optional, overrides documents)
         """
         super().__init__(
             vector_store=vector_store,
             documents=documents,
+            bm25_retriever=bm25_retriever,
             use_reranking=use_reranking,
             reranker_model=reranker_model,
             **kwargs
@@ -284,9 +302,10 @@ class ContextualHybridRetriever(HybridRetriever):
 # Helper function to create retriever
 def create_hybrid_retriever(
     index_name: str,
-    documents: List[Document],
+    documents: List[Document] = None,
     use_contextual: bool = True,
     use_reranking: bool = True,
+    bm25_retriever: Any = None,
     **kwargs
 ) -> HybridRetriever:
     """
@@ -294,9 +313,10 @@ def create_hybrid_retriever(
 
     Args:
         index_name: Pinecone index name
-        documents: List of documents to index
+        documents: List of documents to index (if bm25_retriever not provided)
         use_contextual: Use contextual retriever with reranking
         use_reranking: Enable Cohere reranking
+        bm25_retriever: Pre-built BM25 retriever (optional, overrides documents)
         **kwargs: Additional retriever arguments
 
     Returns:
@@ -323,6 +343,7 @@ def create_hybrid_retriever(
         retriever = ContextualHybridRetriever(
             vector_store=vector_store,
             documents=documents,
+            bm25_retriever=bm25_retriever,
             use_reranking=use_reranking,
             **kwargs
         )
@@ -330,6 +351,7 @@ def create_hybrid_retriever(
         retriever = HybridRetriever(
             vector_store=vector_store,
             documents=documents,
+            bm25_retriever=bm25_retriever,
             **kwargs
         )
 
