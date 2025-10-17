@@ -4,11 +4,51 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ---
 
+## 🎉 Latest Updates (2025-01-17)
+
+### ✅ Major Enhancements Complete
+
+**1. Azure OpenAI Integration** ⭐
+- Full Azure OpenAI support via `src/utils/caching_azure.py`
+- Production-ready with better rate limits and lower costs
+- All components support Azure: embeddings, context generation, answer generation, vision
+
+**2. Whole Document Context** ⭐
+- New `src/get_all_text.py` extracts complete presentation text
+- Context generation now sees ENTIRE presentation, not just neighboring slides
+- Significantly improved context quality and relevance
+
+**3. Overall Information Document** ⭐
+- Presentation summary automatically added as first chunk
+- Contains: title, author, total slides, section list, all slide titles
+- Enables LLM to answer high-level questions about presentation structure
+
+**4. Enhanced Vision Analysis** ⭐
+- Comprehensive OCR support in vision prompts (`src/prompts.py`)
+- Extracts text from images with contextual meaning
+- Better analysis of text-heavy slides and charts
+
+**5. Multi-Provider Support** ⭐
+- **Azure OpenAI**: Recommended for production
+- **OpenAI**: Standard API
+- **X.AI (Grok)**: Alternative for answer generation
+
+**6. Custom QA Chain** ⭐
+- Rewritten to not use deprecated `ConversationalRetrievalChain`
+- Better chat history management
+- Support for multiple LLM providers
+
+**Project Status**: 🟢 Production-ready with enhanced features
+**Last Updated**: 2025-01-17
+**Current Branch**: master
+
+---
+
 ## Project Overview
 
-This is a **production-ready RAG system for PowerPoint presentations** using LangChain and Anthropic's Contextual Retrieval approach. The system indexes .pptx files with LLM-generated context for each chunk, achieving 35%+ accuracy improvement over baseline RAG.
+This is a **production-ready RAG system for PowerPoint presentations** using LangChain and Enhanced Contextual Retrieval. The system indexes .pptx files with LLM-generated context for each chunk, achieving 35%+ accuracy improvement over baseline RAG.
 
-**Core Innovation:** Each chunk gets 50-100 tokens of LLM-generated context explaining its role in the presentation before embedding. This contextual retrieval approach, combined with hybrid search (Vector + BM25 + RRF), reduces retrieval failure rate by 67%.
+**Core Innovation:** Each chunk gets 50-100 tokens of LLM-generated context explaining its role in the presentation before embedding. The context is generated with **full presentation awareness** - the LLM sees ALL slides when creating context. This contextual retrieval approach, combined with hybrid search (Vector + BM25 + RRF), reduces retrieval failure rate by 67%.
 
 ---
 
@@ -17,12 +57,13 @@ This is a **production-ready RAG system for PowerPoint presentations** using Lan
 ### End-to-End Flow
 
 ```
-PPT Upload → PPTLoader → ContextualTextSplitter → Embeddings (Cached) → Pinecone
-                ↓              ↓
-         Vision Analysis  Context Generation (OpenAI/Anthropic)
-              ↓                     ↓
-    Query → HybridRetriever → Rerank → QA Chain → Answer
-         (Vector + BM25 + RRF)
+PPT Upload → PPTLoader → Whole Doc Extraction → ContextualTextSplitter → Embeddings (Cached) → Pinecone
+                ↓              ↓                         ↓
+         Vision Analysis  Overall Info Doc      Context Generation (Azure/OpenAI/X.AI)
+              ↓                     ↓                    ↓
+    Query → HybridRetriever → Rerank → Custom QA Chain → Answer
+         (Vector + BM25 + RRF)              ↓
+                                     (Azure/OpenAI/X.AI)
 ```
 
 ### Two Operational Modes
@@ -42,59 +83,108 @@ PPT Upload → PPTLoader → ContextualTextSplitter → Embeddings (Cached) → 
 
 **File:** `src/splitters/contextual_splitter.py`
 
-This is THE key component implementing Anthropic's contextual retrieval approach:
+This is THE key component implementing contextual retrieval approach with **Whole Document Context**:
 
-1. **Splits slides into chunks** (sentence-based, ~400 tokens)
-2. **Generates LLM context** for each chunk via Claude/OpenAI:
-   - Explains chunk's position in presentation
-   - References previous/next slides
-   - Describes section and narrative flow
-3. **Prepends context to chunk** before embedding
-4. **Batch processes** with rate limiting and async
+1. **Extracts whole document text** via `src/get_all_text.py`:
+   - Captures ALL slides, tables, notes, alt text
+   - Provides complete presentation context for LLM
 
-**Critical Detail:** Prompts are structured with static instructions first, dynamic content last to leverage OpenAI's automatic prompt caching (50% discount on cached tokens >1024).
+2. **Splits slides into chunks** (sentence-based, ~400 tokens)
+
+3. **Generates LLM context** for each chunk with FULL presentation context:
+   - **Full document awareness**: LLM sees entire presentation when generating context
+   - Explains chunk's position in overall narrative
+   - References related slides and sections
+   - Uses structured prompt with whole document content
+
+4. **Prepends context to chunk** before embedding
+
+5. **Batch processes** with rate limiting and async
+
+**Key Innovation:** Context generation now includes `all_slides_content` in the prompt, allowing the LLM to understand how each chunk fits into the ENTIRE presentation, not just neighboring slides.
+
+**Prompt Structure:**
+```xml
+<instructions>
+[Static instructions - CACHED]
+</instructions>
+
+<document>
+Presentation: {title}
+Total Slides: {total}
+All slides content: {all_slides_content}  ← NEW: Full presentation
+</document>
+
+<current_chunk>
+Slide: {slide_number}
+Content: {chunk_content}
+</current_chunk>
+```
+
+**Critical Detail:** Prompts structured for caching (static first, dynamic last). Supports Azure OpenAI and OpenAI.
 
 ---
 
 ## Key Architectural Patterns
 
-### 1. Provider Abstraction (OpenAI OR Anthropic)
+### 1. Multi-Provider Architecture (Azure OpenAI / OpenAI / X.AI)
 
 **Configuration:** `src/config.py`
 
 ```python
+# Azure OpenAI Configuration (Recommended)
+AZURE_OPENAI_API_KEY = "..."
+AZURE_OPENAI_ENDPOINT = "..."
+AZURE_OPENAI_EMBEDDING_DEPLOYMENT = "..."
+AZURE_OPENAI_CHAT_DEPLOYMENT = "..."
+
 # Choose provider for each component
-CONTEXT_GENERATION_PROVIDER = "openai"  # or "anthropic"
+CONTEXT_GENERATION_PROVIDER = "openai"  # "azure", "openai"
 CONTEXT_GENERATION_MODEL = "gpt-4o-mini"
 
-ANSWER_GENERATION_PROVIDER = "openai"  # or "anthropic"
+ANSWER_GENERATION_PROVIDER = "azure"  # "azure", "openai", "xai"
 ANSWER_GENERATION_MODEL = "gpt-4o"
+
+# X.AI (Grok) Support
+XAI_API_KEY = "..."  # For Grok models
 ```
 
-**Implementation:** Both `ContextualTextSplitter` and `PPTQAChain` support dual providers:
-- OpenAI: Better caching integration, faster ecosystem
-- Anthropic: Higher quality, specialized in contextual tasks
+**Implementation:** All major components support multiple providers:
+- **Azure OpenAI**: Production-ready, better rate limits, lower cost
+- **OpenAI**: Standard API, good caching integration
+- **X.AI (Grok)**: Alternative provider for answer generation
 
-### 2. 3-Layer Caching System
+**Key Files:**
+- `src/utils/caching_azure.py` - Azure OpenAI caching utilities
+- `src/utils/caching.py` - OpenAI caching utilities
 
-**File:** `src/utils/caching.py`
+### 2. 3-Layer Caching System (Azure & OpenAI)
+
+**Files:**
+- `src/utils/caching_azure.py` - Azure OpenAI caching (recommended)
+- `src/utils/caching.py` - OpenAI caching
 
 **Layer 1: Embedding Cache** (CacheBackedEmbeddings)
 - Caches embeddings to disk via LangChain's LocalFileStore
 - 75x speedup on repeat embeddings
 - Location: `data/cache/embeddings/`
+- Works with both Azure and OpenAI embeddings
 
 **Layer 2: LLM Response Cache** (SQLiteCache)
 - Caches all LLM responses (context generation, answers)
 - 250x speedup for exact match queries
 - Location: `data/cache/llm_responses/llm_cache.db`
 
-**Layer 3: OpenAI Prompt Caching** (Automatic Server-Side)
-- Prompts >1024 tokens automatically cached by OpenAI
-- 50% discount on cached input tokens
+**Layer 3: Provider-Specific Caching**
+- **Azure OpenAI**: Automatic prompt caching on server side
+- **OpenAI**: Prompts >1024 tokens automatically cached (50% discount)
 - Prompts structured: static instructions first → dynamic content last
 
-**Key Insight:** Always use `get_cached_embeddings()` and `get_cached_llm()` helpers instead of creating models directly.
+**Key Insight:** Always use helper functions:
+- `get_cached_embeddings_azure()` for Azure (recommended)
+- `get_cached_embeddings()` for OpenAI
+- `get_cached_llm_azure()` for Azure LLMs
+- `get_cached_llm()` for OpenAI LLMs
 
 ### 3. Rate Limiting Architecture
 
@@ -128,7 +218,7 @@ Dual rate limiting per provider:
 
 **Optional Cohere Reranking:** If `COHERE_API_KEY` set, applies neural reranking to final top-K results.
 
-### 5. Pipeline Orchestration
+### 5. Pipeline Orchestration (Enhanced)
 
 **File:** `src/pipeline.py`
 
@@ -137,17 +227,26 @@ Dual rate limiting per provider:
 ```python
 # Ingestion Phase
 await pipeline.index_presentation(ppt_path)
-# → Load PPT → Vision Analysis → Contextual Chunking → Embed → Index to Pinecone
+# → Load PPT → Extract Whole Doc → Generate Overall Info → Vision Analysis
+# → Contextual Chunking (with whole doc context) → Embed → Index to Pinecone
 
 # Query Phase
 result = await pipeline.query(question)
-# → Retrieve (Hybrid) → Rerank → Generate Answer → Quality Check
+# → Retrieve (Hybrid) → Rerank → Generate Answer (Custom Chain) → Quality Check
 ```
 
 **Key Methods:**
 - `index_presentation()` - Complete ingestion flow
+  - Returns tuple: `(documents, overall_info)` from loader
+  - Extracts whole document via `get_all_text.whole_document_from_pptx()`
+  - Prepends `overall_info` document to chunks for context
 - `query()` - End-to-end query with answer generation
 - `clear_chat_history()` - Reset conversation memory
+
+**New Features:**
+- **Overall Info Document**: First chunk contains presentation summary (title, author, total slides, section list, all slide titles)
+- **Whole Document Context**: Full presentation text passed to contextual splitter
+- **Azure OpenAI Support**: Uses `get_cached_embeddings_azure()` by default
 
 ---
 
@@ -230,24 +329,35 @@ pytest --cov=src tests/
 ### Environment Variables (`.env`)
 
 **Required:**
-- `OPENAI_API_KEY` - For embeddings, vision, and LLMs
 - `PINECONE_API_KEY` - For vector storage
+- `PINECONE_INDEX_NAME` - Index name for all presentations
 
-**Optional:**
-- `ANTHROPIC_API_KEY` - Alternative LLM provider
+**Azure OpenAI (Recommended for Production):**
+- `AZURE_OPENAI_API_KEY` - Azure OpenAI API key
+- `AZURE_OPENAI_ENDPOINT` - Azure endpoint URL
+- `AZURE_OPENAI_EMBEDDING_DEPLOYMENT` - Embedding model deployment name
+- `AZURE_OPENAI_API_VERSION_EMBEDDING` - API version for embeddings
+- `AZURE_OPENAI_CHAT_DEPLOYMENT` - Chat model deployment name
+- `AZURE_OPENAI_API_VERSION_CHAT` - API version for chat
+
+**OpenAI (Alternative):**
+- `OPENAI_API_KEY` - For embeddings, vision, and LLMs
+
+**Optional Providers:**
+- `XAI_API_KEY` - X.AI (Grok) for answer generation
 - `COHERE_API_KEY` - For reranking
 
 **Model Selection:**
 ```bash
 # Context Generation (choose provider)
-CONTEXT_GENERATION_PROVIDER=openai  # or "anthropic"
+CONTEXT_GENERATION_PROVIDER=openai  # "azure", "openai"
 CONTEXT_GENERATION_MODEL=gpt-4o-mini
 
 # Answer Generation (choose provider)
-ANSWER_GENERATION_PROVIDER=openai  # or "anthropic"
+ANSWER_GENERATION_PROVIDER=azure  # "azure", "openai", "xai"
 ANSWER_GENERATION_MODEL=gpt-4o
 
-# Vision (OpenAI only)
+# Vision (Azure OpenAI or OpenAI)
 VISION_MODEL=gpt-4o-mini
 
 # Caching (highly recommended)
@@ -314,19 +424,28 @@ Content: {chunk_content}
 
 Result: ~40% cost savings on context generation due to caching.
 
-### Vision Analysis Strategy
+### Vision Analysis Strategy (Enhanced with OCR)
 
 **File:** `src/models/vision_analyzer.py`
 
-**When to use:** Only for charts, diagrams, infographics - NOT plain text slides.
+**When to use:** For charts, diagrams, infographics, screenshots, text-heavy images.
 
 **Implementation:**
-- GPT-4o mini for image analysis
-- Structured output: type, data points, insights, text
-- Rate limited per OpenAI vision API limits
-- Expensive: ~$0.015 per image
+- **Azure OpenAI GPT-4o** for image analysis (production)
+- **Enhanced prompt** with OCR capabilities (`src/prompts.py`)
+- Structured output includes:
+  - Description
+  - Key Statistics
+  - Key Message
+  - Context/Insight
+  - Summary
+  - **OCR Results** (NEW): Extracts all visible text with context
+- Rate limited per vision API limits
+- Cost: ~$0.015 per image
 
-**Recommendation:** Enable vision (`--vision`) only when presentations contain significant visual content.
+**Key Enhancement:** Vision analysis now includes comprehensive OCR to extract text from images, making it useful for slides with text overlays, labels, and annotations.
+
+**Recommendation:** Enable vision (`--vision`) for presentations with visual content OR text-heavy images.
 
 ### Pinecone Index Management
 
@@ -389,14 +508,28 @@ pc.create_index(
 
 ### Adding a New Model Provider
 
-1. Update `src/config.py` - Add provider option
-2. Modify component (e.g., `contextual_splitter.py`):
+1. Update `src/config.py` - Add provider configuration:
    ```python
-   if settings.context_generation_provider == "new_provider":
-       self.llm = NewProviderLLM(...)
+   new_provider_api_key: str = Field(..., env="NEW_PROVIDER_API_KEY")
    ```
-3. Add to `.env.example` with documentation
-4. Update `docs/CACHING.md` if caching behavior differs
+
+2. Create caching utilities (if needed):
+   - Create `src/utils/caching_<provider>.py`
+   - Implement `get_cached_embeddings_<provider>()`
+   - Implement `get_cached_llm_<provider>()`
+
+3. Update components to support new provider:
+   - `contextual_splitter.py`:
+     ```python
+     elif settings.context_generation_provider == "new_provider":
+         self.llm = get_cached_llm_<provider>(...)
+     ```
+   - `qa_chain.py`: Add provider option
+   - `vision_analyzer.py`: Add provider option (if vision supported)
+
+4. Add to `.env.example` with documentation
+5. Update `docs/CACHING.md` if caching behavior differs
+6. Test with all three phases: context generation, answer generation, vision
 
 ### Extending Metadata Extraction
 
@@ -426,6 +559,43 @@ class CustomRetriever(BaseRetriever):
 ```
 
 Then use in pipeline: `pipeline.retriever = CustomRetriever(...)`
+
+---
+
+## Key New Files & Components
+
+### Core Functionality
+- **`src/get_all_text.py`** - NEW: Whole document text extraction
+  - Extracts complete presentation text (slides, tables, notes, alt text)
+  - Used for full-context awareness in contextual chunking
+
+- **`src/prompts.py`** - NEW: Centralized prompt management
+  - `generate_context_from_image` - Enhanced vision prompt with OCR
+
+### Azure OpenAI Support
+- **`src/utils/caching_azure.py`** - NEW: Azure OpenAI caching utilities
+  - `AzureOpenAICachingManager` - Complete caching management
+  - `get_cached_embeddings_azure()` - Azure embeddings with cache
+  - `get_cached_llm_azure()` - Azure LLMs with cache
+
+### Enhanced Components
+- **`src/loaders/ppt_loader.py`** - UPDATED:
+  - Returns `(documents, overall_info)` tuple
+  - Generates presentation summary document
+  - Better nested group shape extraction
+
+- **`src/splitters/contextual_splitter.py`** - UPDATED:
+  - Accepts `all_doc_text` for full presentation context
+  - Azure OpenAI support
+
+- **`src/models/vision_analyzer.py`** - UPDATED:
+  - Azure OpenAI vision support
+  - Enhanced OCR capabilities
+
+- **`src/chains/qa_chain.py`** - UPDATED:
+  - Custom implementation (not using ConversationalRetrievalChain)
+  - Azure OpenAI + X.AI (Grok) support
+  - Better chat history management
 
 ---
 

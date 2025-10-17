@@ -5,10 +5,7 @@ Integrates all components: loading, chunking, embedding, indexing, retrieval, QA
 """
 from typing import List, Dict, Optional, Any
 from pathlib import Path
-import asyncio
-import json
 from langchain.schema import Document
-from langchain_openai import OpenAIEmbeddings
 from langchain_pinecone import PineconeVectorStore
 from pinecone import Pinecone, ServerlessSpec
 from loguru import logger
@@ -17,10 +14,8 @@ from src.get_all_text import whole_document_from_pptx
 from src.config import settings
 from src.loaders.ppt_loader import PPTLoader
 from src.splitters.contextual_splitter import ContextualTextSplitter
-from src.models.vision_analyzer import VisionAnalyzer
 from src.retrievers.hybrid_retriever import create_hybrid_retriever
 from src.chains.qa_chain import create_qa_chain
-#from src.utils.caching import get_cached_embeddings
 from src.utils.caching_azure import get_cached_embeddings_azure
 
 
@@ -126,12 +121,13 @@ class PPTContextualRetrievalPipeline:
         logger.info(f"Created {len(self.chunks)} chunks")
         
 
-        # Step 4: Create/Connect to Pinecone Index        logger.info("Step 4/5: Setting up vector store...")
+        # Step 4: Create/Connect to Pinecone Index        
+        logger.info("Step 4/5: Setting up vector store...")
         await self._setup_pinecone_index()
 
         # Step 5: Index chunks
         logger.info("Step 5/5: Indexing chunks to Pinecone...")
-        #await self._index_chunks()
+        await self._index_chunks()
 
         # Create retriever and QA chain
         self._setup_retrieval()

@@ -42,10 +42,10 @@ class VisionAnalyzer:
         # )
         from langchain_openai import AzureChatOpenAI
         self.llm = AzureChatOpenAI(
-            azure_endpoint="https://momo-wealth-management.openai.azure.com/",
+            azure_endpoint=settings.azure_openai_endpoint,
             api_key=settings.azure_openai_api_key,
             azure_deployment=self.model_name,
-            api_version="2024-08-01-preview",
+            api_version=settings.azure_openai_api_version_chat,
             temperature=0.0
         )
         logger.info(f"Vision analyzer initialized with model: {self.model_name}")
