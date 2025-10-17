@@ -38,12 +38,22 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - Better chat history management
 - Support for multiple LLM providers
 
-**7. Search Backend Abstraction Layer** ⭐⭐⭐ **NEW**
+**7. Search Backend Abstraction Layer** ⭐⭐⭐
 - Flexible architecture supporting multiple search backends
 - **BM25 Serialize** (current): SQLite + serialized index for cross-document search
+- **Cross-Document Search Only**: Always queries ALL indexed presentations (no single-presentation mode)
 - **Elasticsearch** (future): Ready for migration when scale requires it
 - Separated ingest/retrieval phases with persistent storage
 - See: `docs/ELASTICSEARCH_VS_BM25_COMPARISON.md` for migration strategy
+
+**8. Comprehensive Streamlit UI** ⭐⭐⭐ **NEW**
+- **5-page web interface**: Presentations, Upload, Query, Stats, Settings
+- **Presentation Management**: List, view, delete presentations with full BM25Store integration
+- **Upload & Index**: Progress tracking with configurable options (contextual, vision, images, notes)
+- **Cross-Document Query**: Search across all presentations with source attribution
+- **Statistics Dashboard**: System metrics, backend details, presentation breakdown
+- **Bug Fixes**: Clear history no longer triggers unwanted query execution
+- See: `streamlit_app/app.py` and `streamlit_app/ui_utils.py`
 
 **Architecture:**
 ```
@@ -342,11 +352,11 @@ stats = await pipeline.index_presentation(ppt_path)
 from src.retrieval_pipeline import RetrievalPipeline
 
 retrieval = RetrievalPipeline(
-    presentation_id="ppt-report-2024",  # Optional: for single-doc mode
     use_reranking=True
 )
 await retrieval.initialize()
 
+# Query across ALL indexed presentations (cross-document search)
 result = await retrieval.query("What is the revenue?")
 print(result["answer"])
 ```
@@ -389,28 +399,29 @@ print(result["answer"])
 
 **File:** `src/retrieval_pipeline.py`
 
-**`RetrievalPipeline`** handles the query phase:
+**`RetrievalPipeline`** handles the query phase with **cross-document search** (queries ALL indexed presentations):
 
 ```python
 from src.retrieval_pipeline import RetrievalPipeline
 
 # Initialize retrieval pipeline
 retrieval = RetrievalPipeline(
-    presentation_id="ppt-report-2024",  # Optional: specific presentation
-    index_name="ppt-my-index",          # Optional: Pinecone index
+    index_name="ppt-my-index",  # Optional: Pinecone index name
     use_reranking=True
 )
 
 # Initialize (load indexes, create retriever, setup QA chain)
 await retrieval.initialize()
 
-# Query
+# Query across ALL presentations
 result = await retrieval.query("What is the revenue growth?")
 print(result["answer"])
 
-# View sources
+# View sources (from any indexed presentation)
 for source in result["formatted_sources"]:
-    print(f"Slide {source['slide_number']}: {source['content'][:100]}")
+    pres_id = source['presentation_id']
+    slide_num = source['slide_number']
+    print(f"[{pres_id}] Slide {slide_num}: {source['content'][:100]}")
 
 # Clear chat history
 retrieval.clear_chat_history()
@@ -419,7 +430,7 @@ retrieval.clear_chat_history()
 stats = await retrieval.get_stats()
 print(f"Backend: {stats['backend']}, Documents: {stats['total_documents']}")
 
-# List all presentations
+# List all indexed presentations
 presentations = await retrieval.list_presentations()
 for pres in presentations:
     print(f"{pres['presentation_id']}: {pres['title']}")
@@ -427,18 +438,18 @@ for pres in presentations:
 
 **Key Methods:**
 - `__init__()` - Create retrieval pipeline
-  - `presentation_id`: Optional, for single-document mode
-  - `index_name`: Pinecone index name
+  - `index_name`: Pinecone index name (optional, defaults to env)
   - `use_reranking`: Enable Cohere reranking
+  - **Note:** No `presentation_id` parameter - always searches ALL presentations
 - `initialize()` - Setup retrieval components (async)
   - Loads embeddings with cache
-  - Initializes text retriever (loads BM25 from SQLite)
+  - Initializes text retriever (loads BM25 from SQLite with ALL documents)
   - Connects to Pinecone vector store
   - Creates hybrid retriever (Vector + BM25 + RRF)
   - Creates QA chain with chat memory
-- `query()` - Query with question (async)
+- `query()` - Query across all presentations (async)
   - Returns answer, sources, metadata
-  - Supports filters (e.g., `{"presentation_id": "ppt-123"}`)
+  - Sources include `presentation_id` to identify origin
   - Formats sources for display
 - `clear_chat_history()` - Reset conversation memory
 - `get_stats()` - Get pipeline statistics (async)
@@ -448,10 +459,8 @@ for pres in presentations:
 ```python
 from src.retrieval_pipeline import quick_query
 
-result = await quick_query(
-    "What is the revenue?",
-    presentation_id="ppt-report-2024"
-)
+# Query across all presentations
+result = await quick_query("What is the revenue?")
 print(result["answer"])
 ```
 
@@ -459,6 +468,7 @@ print(result["answer"])
 - **Ingestion**: Use `PPTContextualRetrievalPipeline` from `src/pipeline.py`
 - **Query**: Use `RetrievalPipeline` from `src/retrieval_pipeline.py`
 - Both pipelines are independent and can run in separate processes
+- **Query Mode**: Always cross-document (searches all indexed presentations)
 
 ---
 
@@ -854,12 +864,30 @@ Then use in pipeline: `pipeline.retriever = CustomRetriever(...)`
   - Returns statistics only, no retriever/QA chain setup
 
 - **`src/retrieval_pipeline.py`** - NEW: Query/Retrieval pipeline
-  - `RetrievalPipeline` - Complete retrieval phase handler
-  - `initialize()` - Load BM25, connect Pinecone, create retriever + QA chain
-  - `query()` - Query with chat history
+  - `RetrievalPipeline` - Complete retrieval phase handler (cross-document search only)
+  - `initialize()` - Load BM25 (all documents), connect Pinecone, create retriever + QA chain
+  - `query()` - Query across ALL presentations with chat history
   - `list_presentations()` - List all indexed presentations
   - `get_stats()` - Get retrieval statistics
-  - Convenience function `quick_query()` for one-shot queries
+  - Convenience function `quick_query()` for one-shot cross-document queries
+
+### Streamlit UI Components (NEW)
+- **`streamlit_app/app.py`** - NEW: Main Streamlit application
+  - 5-page web interface (Presentations, Upload, Query, Stats, Settings)
+  - `show_presentations_page()` - Manage presentations (list, view, delete)
+  - `show_upload_page()` - Upload and index with progress tracking
+  - `show_query_page()` - Cross-document query interface with chat history
+  - `show_stats_page()` - System statistics and backend details
+  - `show_settings_page()` - Configuration display
+
+- **`streamlit_app/ui_utils.py`** - NEW: UI utilities and business logic
+  - `PresentationManager` - Comprehensive presentation management class
+  - `list_presentations_sync()` - Load presentations from BM25Store
+  - `upload_and_index_sync()` - Upload with progress callback
+  - `query_presentation_sync()` - Query wrapper for Streamlit
+  - `delete_presentation_sync()` - Complete deletion (BM25 + Pinecone + images)
+  - `get_statistics_sync()` - System statistics
+  - `get_presentation_manager()` - Singleton instance
 
 ---
 
@@ -887,8 +915,11 @@ Then use in pipeline: `pipeline.retriever = CustomRetriever(...)`
 
 ### Current Limitations
 
-1. **No Presentation Management UI:** ⚠️ No UI to list/select/delete presentations (API exists in BM25Store).
-   - **Solution:** Multi-page Streamlit UI planned (Dashboard, Ingest, Query, Manage)
+1. ~~**No Presentation Management UI:**~~ ✅ **RESOLVED**
+   - **Comprehensive Streamlit UI implemented** with 5 pages (Presentations, Upload, Query, Stats, Settings)
+   - Full presentation management: list, view, delete with BM25Store integration
+   - Upload with progress tracking and configurable options
+   - Cross-document query with source attribution
 
 2. **Prompt Caching Threshold:** OpenAI automatic caching only works for prompts >1024 tokens. Short prompts don't benefit from server-side caching.
 
@@ -921,11 +952,12 @@ Then use in pipeline: `pipeline.retriever = CustomRetriever(...)`
 
 ### Future Improvements (Planned)
 
-🚧 **Phase 1: Multi-Page Streamlit UI** (Planned)
-- Dashboard page (statistics + quick actions)
-- Ingest page (upload + configure + progress)
-- Query page (select presentation + ask questions)
-- Manage page (list + search + delete presentations)
+~~🚧 **Phase 1: Multi-Page Streamlit UI**~~ ✅ **COMPLETED**
+- ✅ Presentations page (list + search + delete presentations)
+- ✅ Upload page (upload + configure + progress tracking)
+- ✅ Query page (cross-document search + chat history)
+- ✅ Stats page (system statistics + backend details)
+- ✅ Settings page (configuration display)
 
 🚧 **Phase 2: CLI Improvements** (Planned)
 - `scripts/list_presentations.py` - List all indexed presentations from BM25Store
@@ -969,8 +1001,11 @@ Then use in pipeline: `pipeline.retriever = CustomRetriever(...)`
 - **Search backend abstraction** (BM25 Serialize + Elasticsearch interface)
 - **Cross-document search** support
 - **Separated ingest/query workflow**
+- **Comprehensive Streamlit UI** (5 pages with full presentation management)
+- **Upload with progress tracking** and configurable options
+- **Cross-document query** with source attribution and chat history
+- **Complete deletion workflow** (BM25 + Pinecone + images)
 - CLI scripts for automation
-- Streamlit web UI
 - Comprehensive documentation
 
 **Key Achievements:**

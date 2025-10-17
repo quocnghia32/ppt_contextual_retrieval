@@ -189,18 +189,17 @@ stats = asyncio.run(index_with_progress(ppt_path, update_progress))
 UI Query Input
     │
     ├─→ Create RetrievalPipeline (ONCE per session)
-    │       - presentation_id (optional: for single-doc mode)
     │       - index_name (optional: defaults from .env)
     │       - use_reranking (default: True)
+    │       - Note: Always queries ALL presentations (cross-document search)
     │
     ├─→ Call: await retrieval.initialize() (ONCE)
     │       │
     │       ├─→ Load embeddings (with cache)
     │       │
     │       ├─→ Initialize text retriever
-    │       │       - Load BM25 from SQLite
+    │       │       - Load BM25 from SQLite (ALL documents)
     │       │       - Load serialized index (~3s for 60K chunks)
-    │       │       - Optional: filter by presentation_id
     │       │
     │       ├─→ Connect to Pinecone
     │       │       - PineconeVectorStore
@@ -241,6 +240,8 @@ class QuerySession:
     """
     UI session manager for querying indexed presentations.
 
+    Note: Always queries ALL presentations (cross-document search).
+
     Usage:
         session = QuerySession()
         await session.initialize()
@@ -249,11 +250,9 @@ class QuerySession:
 
     def __init__(
         self,
-        presentation_id: str = None,  # Optional: single presentation
         use_reranking: bool = True
     ):
         self.retrieval = RetrievalPipeline(
-            presentation_id=presentation_id,
             use_reranking=use_reranking
         )
         self.initialized = False
@@ -340,47 +339,14 @@ if st.button("Clear Chat History"):
     st.success("History cleared")
 ```
 
-### 2.3 Single-Document Mode (Query Specific Presentation)
+### 2.3 Cross-Document Search (Query All Presentations)
 
-```python
-async def query_specific_presentation(presentation_id: str, question: str):
-    """
-    Query a specific presentation only.
-
-    Args:
-        presentation_id: e.g., "ppt-report-2024"
-        question: User question
-
-    Returns:
-        Query result
-    """
-    # Create retrieval pipeline for specific presentation
-    retrieval = RetrievalPipeline(
-        presentation_id=presentation_id,  # Filter by this presentation
-        use_reranking=True
-    )
-
-    # Initialize (loads BM25 for this presentation only)
-    await retrieval.initialize()
-
-    # Query
-    result = await retrieval.query(question)
-
-    return result
-
-# Usage
-result = await query_specific_presentation(
-    presentation_id="ppt-report-2024",
-    question="What is the revenue?"
-)
-```
-
-### 2.4 Cross-Document Mode (Query All Presentations)
+**Note:** This is the ONLY query mode. The system always searches across ALL indexed presentations.
 
 ```python
 async def query_all_presentations(question: str):
     """
-    Query across ALL indexed presentations.
+    Query across ALL indexed presentations (cross-document search).
 
     Args:
         question: User question
@@ -388,16 +354,15 @@ async def query_all_presentations(question: str):
     Returns:
         Query result with sources from multiple presentations
     """
-    # Create retrieval pipeline WITHOUT presentation_id
+    # Create retrieval pipeline (always queries all presentations)
     retrieval = RetrievalPipeline(
-        presentation_id=None,  # Query all presentations
         use_reranking=True
     )
 
     # Initialize (loads BM25 for ALL presentations)
     await retrieval.initialize()
 
-    # Query
+    # Query across all presentations
     result = await retrieval.query(question)
 
     # Group sources by presentation
@@ -456,21 +421,20 @@ async def list_all_presentations():
 
     return presentations
 
-# Streamlit UI for presentation selection
+# Streamlit UI for presentation listing
 presentations = asyncio.run(list_all_presentations())
 
-selected = st.selectbox(
-    "Select presentation:",
-    options=[p["presentation_id"] for p in presentations],
-    format_func=lambda x: next(
-        p["name"] for p in presentations if p["presentation_id"] == x
-    )
-)
+# Display all presentations (for user reference)
+st.markdown("### 📚 Indexed Presentations")
+for pres in presentations:
+    st.write(f"- {pres['name']} ({pres['total_slides']} slides, {pres['total_chunks']} chunks)")
 
-# Initialize session for selected presentation
-if selected:
-    session = QuerySession(presentation_id=selected)
-    asyncio.run(session.initialize())
+# Initialize session (always queries all presentations)
+if "query_session" not in st.session_state:
+    st.session_state.query_session = QuerySession()
+    asyncio.run(st.session_state.query_session.initialize())
+
+st.info("💡 Queries will search across ALL indexed presentations")
 ```
 
 ### 3.2 Get Statistics
@@ -727,7 +691,7 @@ stats = await pipeline.index_presentation(ppt_path)
 ```python
 from src.retrieval_pipeline import RetrievalPipeline
 
-retrieval = RetrievalPipeline(presentation_id=None)  # None = all presentations
+retrieval = RetrievalPipeline()
 await retrieval.initialize()  # Call once
 
 result = await retrieval.query(question)

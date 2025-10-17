@@ -30,7 +30,7 @@ class RetrievalPipeline:
 
     Usage:
         # Initialize for a specific presentation
-        pipeline = RetrievalPipeline(presentation_id="ppt-report-2024")
+        pipeline = RetrievalPipeline()
         await pipeline.initialize()
 
         # Query
@@ -43,7 +43,6 @@ class RetrievalPipeline:
 
     def __init__(
         self,
-        presentation_id: Optional[str] = None,
         index_name: Optional[str] = None,
         use_reranking: bool = True
     ):
@@ -55,7 +54,6 @@ class RetrievalPipeline:
             index_name: Pinecone index name (defaults to PINECONE_INDEX_NAME from .env)
             use_reranking: Enable Cohere reranking
         """
-        self.presentation_id = presentation_id
         self.index_name = index_name or settings.pinecone_index_name
         self.use_reranking = use_reranking
 
@@ -68,7 +66,7 @@ class RetrievalPipeline:
 
         logger.info(
             f"Retrieval pipeline created: "
-            f"presentation={presentation_id}, index={self.index_name}, "
+            f"index={self.index_name}, "
             f"reranking={use_reranking}"
         )
 
@@ -101,10 +99,10 @@ class RetrievalPipeline:
         )
         await self.text_retriever.initialize()
 
-        # Optional: Load specific presentation (for single-doc mode)
-        if self.presentation_id:
-            logger.info(f"Loading presentation: {self.presentation_id}")
-            await self.text_retriever.load_presentation(self.presentation_id)
+        # # Optional: Load specific presentation (for single-doc mode)
+        # if self.presentation_id:
+        #     logger.info(f"Loading presentation: {self.presentation_id}")
+        #     await self.text_retriever.load_presentation(self.presentation_id)
 
         # Step 3: Connect to Pinecone vector store
         logger.info("Step 3/5: Connecting to Pinecone...")
@@ -276,7 +274,6 @@ async def quick_query(
         print(result["answer"])
     """
     pipeline = RetrievalPipeline(
-        presentation_id=presentation_id,
         index_name=index_name
     )
     await pipeline.initialize()

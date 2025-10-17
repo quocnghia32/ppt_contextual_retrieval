@@ -16,6 +16,16 @@ from src.pipeline import PPTContextualRetrievalPipeline
 from src.utils.rate_limiter import rate_limiter
 from loguru import logger
 
+# Import comprehensive UI utilities
+from streamlit_app.ui_utils import (
+    get_presentation_manager,
+    list_presentations_sync,
+    upload_and_index_sync,
+    query_presentation_sync,
+    delete_presentation_sync,
+    get_statistics_sync
+)
+
 # Configure logger
 logger.add(
     "logs/app_{time}.log",
@@ -98,7 +108,7 @@ def main():
         st.markdown("## 🎯 Navigation")
         page = st.radio(
             "Select Page",
-            ["📤 Upload & Index", "💬 Query", "📊 Stats", "⚙️ Settings"],
+            ["📚 Presentations", "📤 Upload & Index", "💬 Query", "📊 Stats", "⚙️ Settings"],
             label_visibility="collapsed"
         )
 
@@ -115,14 +125,22 @@ def main():
 
         st.markdown("---")
         st.markdown("### 📚 Indexed Files")
-        if st.session_state.indexed_presentations:
-            for ppt_id, info in st.session_state.indexed_presentations.items():
-                st.text(f"✓ {info['title'][:30]}...")
-        else:
-            st.info("No presentations indexed yet")
+        try:
+            presentations = list_presentations_sync()
+            if presentations:
+                for pres in presentations[:5]:  # Show max 5
+                    st.text(f"✓ {pres['name'][:30]}...")
+                if len(presentations) > 5:
+                    st.text(f"... and {len(presentations) - 5} more")
+            else:
+                st.info("No presentations indexed")
+        except:
+            st.info("Loading...")
 
     # Main content
-    if page == "📤 Upload & Index":
+    if page == "📚 Presentations":
+        show_presentations_page()
+    elif page == "📤 Upload & Index":
         show_upload_page()
     elif page == "💬 Query":
         show_query_page()
@@ -130,6 +148,120 @@ def main():
         show_stats_page()
     elif page == "⚙️ Settings":
         show_settings_page()
+
+
+def show_presentations_page():
+    """Presentations management page."""
+    st.markdown('<div class="main-header">📚 Manage Presentations</div>', unsafe_allow_html=True)
+    st.markdown('<div class="sub-header">Browse, search, and manage indexed presentations</div>', unsafe_allow_html=True)
+
+    # Load presentations from BM25Store
+    try:
+        presentations = list_presentations_sync()
+
+        if not presentations:
+            st.info("📭 No presentations indexed yet. Upload a presentation to get started!")
+            return
+
+        # Summary metrics
+        col1, col2, col3 = st.columns(3)
+        with col1:
+            st.metric("Total Presentations", len(presentations))
+        with col2:
+            total_slides = sum(p['total_slides'] for p in presentations)
+            st.metric("Total Slides", total_slides)
+        with col3:
+            total_chunks = sum(p['total_chunks'] for p in presentations)
+            st.metric("Total Chunks", total_chunks)
+
+        st.markdown("---")
+
+        # Search box
+        search = st.text_input("🔍 Search presentations", placeholder="Type to filter...")
+
+        # Filter presentations
+        if search:
+            filtered = [
+                p for p in presentations
+                if search.lower() in p['name'].lower()
+                or search.lower() in p.get('title', '').lower()
+            ]
+        else:
+            filtered = presentations
+
+        st.markdown(f"### 📋 Presentations ({len(filtered)})")
+
+        # Display presentations
+        for idx, pres in enumerate(filtered):
+            with st.expander(
+                f"📄 {pres['name']} ({pres['total_slides']} slides, {pres['total_chunks']} chunks)",
+                expanded=(idx == 0)
+            ):
+                col1, col2 = st.columns([3, 1])
+
+                with col1:
+                    st.markdown(f"**ID:** `{pres['presentation_id']}`")
+                    st.markdown(f"**Title:** {pres.get('title', 'N/A')}")
+                    st.markdown(f"**Slides:** {pres['total_slides']}")
+                    st.markdown(f"**Chunks:** {pres['total_chunks']}")
+                    st.markdown(f"**Indexed:** {pres['indexed_at'].split('T')[0]}")
+                    st.markdown(f"**Pinecone Index:** {pres['pinecone_index_name']}")
+
+                with col2:
+                    # Delete button
+                    if st.button(
+                        "🗑️ Delete",
+                        key=f"delete_{pres['presentation_id']}",
+                        type="secondary",
+                        use_container_width=True
+                    ):
+                        # Confirm deletion
+                        st.session_state[f'confirm_delete_{pres["presentation_id"]}'] = True
+
+                    # Show confirmation if requested
+                    if st.session_state.get(f'confirm_delete_{pres["presentation_id"]}'):
+                        st.warning("⚠️ Confirm deletion?")
+
+                        col_a, col_b = st.columns(2)
+                        with col_a:
+                            if st.button(
+                                "Yes",
+                                key=f"confirm_yes_{pres['presentation_id']}",
+                                type="primary",
+                                use_container_width=True
+                            ):
+                                with st.spinner("Deleting..."):
+                                    result = delete_presentation_sync(
+                                        pres['presentation_id'],
+                                        delete_pinecone=True,
+                                        delete_images=True
+                                    )
+
+                                    if result['deleted_from_bm25']:
+                                        st.success(f"✅ Deleted {pres['name']}")
+                                        # Clear confirmation state
+                                        del st.session_state[f'confirm_delete_{pres["presentation_id"]}']
+                                        st.rerun()
+                                    else:
+                                        st.error("❌ Deletion failed")
+                                        if result['errors']:
+                                            for err in result['errors']:
+                                                st.error(err)
+
+                        with col_b:
+                            if st.button(
+                                "No",
+                                key=f"confirm_no_{pres['presentation_id']}",
+                                use_container_width=True
+                            ):
+                                del st.session_state[f'confirm_delete_{pres["presentation_id"]}']
+                                st.rerun()
+
+    except Exception as e:
+        st.error(f"❌ Failed to load presentations: {str(e)}")
+        logger.error(f"Failed to load presentations: {e}")
+        import traceback
+        logger.error(traceback.format_exc())
 
 
 def show_upload_page():
@@ -163,137 +295,141 @@ def show_upload_page():
 
         # Index button
         if st.button("🚀 Start Indexing", type="primary", use_container_width=True):
-            with st.spinner("Indexing presentation... This may take a few minutes."):
-                try:
-                    # Generate index name
-                    ppt_id = uploaded_file.name.replace('.pptx', '').replace(' ', '-').lower()
-                    #index_name = f"ppt-{ppt_id}"[:50]
-                    index_name = settings.pinecone_index_name
+            try:
+                # Progress bar
+                progress_bar = st.progress(0, text="Initializing...")
 
-                    # Create pipeline
-                    progress_bar = st.progress(0, text="Initializing pipeline...")
-                    pipeline = PPTContextualRetrievalPipeline(
-                        #index_name=index_name,
-                        use_contextual=add_context,
-                        use_vision=extract_images,
-                        use_reranking=True
-                    )
+                def update_progress(pct, msg):
+                    progress_bar.progress(pct, text=msg)
 
-                    progress_bar.progress(20, text="Loading and analyzing presentation...")
+                # Call comprehensive upload_and_index
+                stats = upload_and_index_sync(
+                    file_path=str(upload_path),
+                    use_contextual=add_context,
+                    use_vision=extract_images,
+                    extract_images=extract_images,
+                    include_notes=include_notes,
+                    progress_callback=update_progress
+                )
 
-                    # Index presentation
-                    logger.info(f"Indexing presentation: {uploaded_file.name} with path {upload_path}")
-                    stats = asyncio.run(pipeline.index_presentation(
-                        str(upload_path),
-                        extract_images=extract_images,
-                        include_notes=include_notes,
-                    ))
+                # Success message
+                st.markdown(f"""
+                <div class="success-box">
+                    <h3>✅ Indexing Complete!</h3>
+                    <p><strong>Presentation ID:</strong> {stats['presentation_id']}</p>
+                    <p><strong>Title:</strong> {stats['presentation']}</p>
+                    <p><strong>Slides:</strong> {stats['slides']}</p>
+                    <p><strong>Chunks:</strong> {stats['chunks']}</p>
+                    <p><strong>Contextual:</strong> {'Yes' if stats['contextual'] else 'No'}</p>
+                    <p><strong>Vision Analysis:</strong> {'Yes' if stats['vision_analyzed'] else 'No'}</p>
+                    <p><strong>Vector Store:</strong> Pinecone ({settings.pinecone_index_name})</p>
+                    <p><strong>Text Search:</strong> BM25 (SQLite + Serialized Index)</p>
+                    <p><strong>Indexed At:</strong> {stats['indexed_at'].split('T')[0]}</p>
+                </div>
+                """, unsafe_allow_html=True)
 
-                    progress_bar.progress(100, text="Indexing complete!")
+                st.success("🎉 Presentation indexed successfully! Go to 'Presentations' or 'Query' page.")
+                st.balloons()
 
-                    # Store pipeline and metadata
-                    st.session_state.pipelines[ppt_id] = pipeline
-                    st.session_state.indexed_presentations[ppt_id] = {
-                        'title': stats.get('presentation', uploaded_file.name),
-                        'slides': stats['slides'],
-                        'chunks': stats['chunks'],
-                        'timestamp': datetime.now().isoformat(),
-                        'index_name': index_name,
-                        'contextual': stats['contextual'],
-                        'vision_analyzed': stats['vision_analyzed']
-                    }
-
-                    st.session_state.current_presentation = ppt_id
-
-                    # Success message
-                    st.markdown(f"""
-                    <div class="success-box">
-                        <h3>✅ Indexing Complete!</h3>
-                        <p><strong>Presentation:</strong> {stats['presentation']}</p>
-                        <p><strong>Slides:</strong> {stats['slides']}</p>
-                        <p><strong>Chunks:</strong> {stats['chunks']}</p>
-                        <p><strong>Contextual:</strong> {'Yes' if stats['contextual'] else 'No'}</p>
-                        <p><strong>Vision Analysis:</strong> {'Yes' if stats['vision_analyzed'] else 'No'}</p>
-                        <p><strong>Vector Store:</strong> Pinecone ({index_name})</p>
-                    </div>
-                    """, unsafe_allow_html=True)
-
-                    st.success("🎉 Presentation indexed successfully! You can now query it.")
-
-                except Exception as e:
-                    st.markdown(f"""
-                    <div class="error-box">
-                        <h3>❌ Indexing Failed</h3>
-                        <p>{str(e)}</p>
-                    </div>
-                    """, unsafe_allow_html=True)
-                    logger.error(f"Indexing failed: {e}")
-                    import traceback
-                    logger.error(traceback.format_exc())
+            except Exception as e:
+                st.markdown(f"""
+                <div class="error-box">
+                    <h3>❌ Indexing Failed</h3>
+                    <p>{str(e)}</p>
+                </div>
+                """, unsafe_allow_html=True)
+                logger.error(f"Indexing failed: {e}")
+                import traceback
+                logger.error(traceback.format_exc())
 
 
 def show_query_page():
     """Query interface page."""
     st.markdown('<div class="main-header">💬 Query Presentation</div>', unsafe_allow_html=True)
 
-    if not st.session_state.indexed_presentations:
-        st.warning("⚠️ No presentations indexed yet. Please upload and index a presentation first.")
+    # Load presentations from BM25Store
+    try:
+        presentations = list_presentations_sync()
+
+        if not presentations:
+            st.warning("⚠️ No presentations indexed yet. Please upload and index a presentation first.")
+            return
+
+        # Create options: Add "All Presentations" option
+        ppt_options = {"__all__": "🌐 All Presentations (Cross-Document Search)"}
+        ppt_options.update({
+            p['presentation_id']: f"{p['name']} ({p['total_chunks']} chunks)"
+            for p in presentations
+        })
+
+        selected_ppt = st.selectbox(
+            "Select Presentation",
+            options=list(ppt_options.keys()),
+            format_func=lambda x: ppt_options[x]
+        )
+
+    except Exception as e:
+        st.error(f"❌ Failed to load presentations: {str(e)}")
+        logger.error(f"Failed to load presentations: {e}")
         return
 
-    # Select presentation
-    ppt_options = {
-        ppt_id: info['title']
-        for ppt_id, info in st.session_state.indexed_presentations.items()
-    }
-
-    selected_ppt = st.selectbox(
-        "Select Presentation",
-        options=list(ppt_options.keys()),
-        format_func=lambda x: ppt_options[x]
-    )
-
     if selected_ppt:
-        ppt_info = st.session_state.indexed_presentations[selected_ppt]
-
-        # Show presentation info
-        col1, col2, col3 = st.columns(3)
-        with col1:
-            st.metric("Slides", ppt_info['slides'])
-        with col2:
-            st.metric("Chunks", ppt_info['chunks'])
-        with col3:
-            st.metric("Indexed", ppt_info['timestamp'].split('T')[0])
+        # Show presentation info (if not "all")
+        if selected_ppt != "__all__":
+            ppt_info = next((p for p in presentations if p['presentation_id'] == selected_ppt), None)
+            if ppt_info:
+                col1, col2, col3 = st.columns(3)
+                with col1:
+                    st.metric("Slides", ppt_info['total_slides'])
+                with col2:
+                    st.metric("Chunks", ppt_info['total_chunks'])
+                with col3:
+                    st.metric("Indexed", ppt_info['indexed_at'].split('T')[0])
+        else:
+            # Show aggregate stats for all
+            col1, col2, col3 = st.columns(3)
+            with col1:
+                st.metric("Total Presentations", len(presentations))
+            with col2:
+                total_slides = sum(p['total_slides'] for p in presentations)
+                st.metric("Total Slides", total_slides)
+            with col3:
+                total_chunks = sum(p['total_chunks'] for p in presentations)
+                st.metric("Total Chunks", total_chunks)
 
         st.markdown("---")
-
-        # Query input
-        query = st.text_input(
-            "Ask a question about the presentation",
-            placeholder="e.g., What was the revenue growth in Q4?",
-            key="query_input"
-        )
 
         # Clear history button
         col1, col2 = st.columns([3, 1])
         with col2:
             if st.button("🗑️ Clear History"):
-                if selected_ppt in st.session_state.pipelines:
-                    st.session_state.pipelines[selected_ppt].clear_chat_history()
-                    st.success("Chat history cleared!")
-                    st.rerun()
+                manager = get_presentation_manager()
+                asyncio.run(manager.clear_chat_history())
+                # Clear query input by removing from session state
+                if "query_input" in st.session_state:
+                    del st.session_state["query_input"]
+                st.success("Chat history cleared!")
+                st.rerun()
+
+        # Query input
+        query = st.text_input(
+            "Ask a question",
+            placeholder="e.g., What was the revenue growth?" if selected_ppt != "__all__" else "e.g., Compare revenue across all reports",
+            key="query_input"
+        )
 
         if query:
-            # Get pipeline
-            if selected_ppt not in st.session_state.pipelines:
-                st.error("⚠️ Pipeline not found. Please re-index the presentation.")
-                return
-
-            pipeline = st.session_state.pipelines[selected_ppt]
-
             with st.spinner("🤔 Thinking..."):
                 try:
-                    # Query the pipeline
-                    result = asyncio.run(pipeline.query(query, return_sources=True))
+                    # Determine presentation_id for query
+                    query_ppt_id = None if selected_ppt == "__all__" else selected_ppt
+
+                    # Query using comprehensive method
+                    result = query_presentation_sync(
+                        query=query,
+                        presentation_id=query_ppt_id,
+                        return_sources=True
+                    )
 
                     # Display answer
                     st.markdown("### 💡 Answer")
@@ -364,47 +500,95 @@ def show_stats_page():
     """Statistics page."""
     st.markdown('<div class="main-header">📊 System Statistics</div>', unsafe_allow_html=True)
 
-    col1, col2, col3, col4 = st.columns(4)
+    try:
+        # Get comprehensive statistics
+        stats = get_statistics_sync()
 
-    with col1:
-        st.metric(
-            "Indexed Presentations",
-            len(st.session_state.indexed_presentations)
-        )
+        # Main metrics
+        col1, col2, col3, col4 = st.columns(4)
 
-    with col2:
-        total_chunks = sum(
-            info.get('chunks', 0)
-            for info in st.session_state.indexed_presentations.values()
-        )
-        st.metric("Total Chunks", total_chunks)
+        with col1:
+            st.metric("Indexed Presentations", stats['total_presentations'])
 
-    with col3:
-        total_slides = sum(
-            info.get('slides', 0)
-            for info in st.session_state.indexed_presentations.values()
-        )
-        st.metric("Total Slides", total_slides)
+        with col2:
+            st.metric("Total Documents", f"{stats['total_documents']:,}")
 
-    with col4:
-        st.metric("Queries", len(st.session_state.chat_history))
+        with col3:
+            st.metric("Total Slides", stats['total_slides'])
 
-    st.markdown("---")
+        with col4:
+            st.metric("Storage Size", f"{stats['total_size_mb']:.2f} MB")
 
-    # Rate limit details
-    st.markdown("### 📈 Rate Limit Details")
+        st.markdown("---")
 
-    col1, col2 = st.columns(2)
+        # Backend details
+        st.markdown("### 🔧 Backend Configuration")
 
-    with col1:
-        st.markdown("#### OpenAI hehe")
-        stats = rate_limiter.get_stats("openai_vision")
-        st.json(stats)
+        col1, col2, col3 = st.columns(3)
 
-    with col2:
-        st.markdown("#### OpenAI")
-        stats = rate_limiter.get_stats("openai_vision")
-        st.json(stats)
+        with col1:
+            st.markdown("#### Text Search")
+            st.write(f"**Backend:** {stats['backend_type']}")
+            st.write(f"**SQLite:** {stats['sqlite_size_mb']:.2f} MB")
+            st.write(f"**Index:** {stats['index_size_mb']:.2f} MB")
+            st.write(f"**Loaded:** {'✅' if stats['index_loaded'] else '❌'}")
+
+        with col2:
+            st.markdown("#### Vector Store")
+            st.write(f"**Provider:** Pinecone")
+            st.write(f"**Index:** {stats['pinecone_index']}")
+            st.write(f"**Dimension:** 3072 (text-embedding-3-large)")
+            st.write(f"**Metric:** cosine")
+
+        with col3:
+            st.markdown("#### Models")
+            st.write(f"**Embedding:** {settings.embedding_model}")
+            st.write(f"**Context:** {settings.context_generation_model}")
+            st.write(f"**Answer:** {settings.answer_generation_model}")
+            st.write(f"**Vision:** {settings.vision_model}")
+
+        st.markdown("---")
+
+        # Presentations breakdown
+        st.markdown("### 📚 Presentations Breakdown")
+
+        if stats['presentations']:
+            for pres in stats['presentations']:
+                col1, col2, col3, col4 = st.columns([3, 1, 1, 1])
+
+                with col1:
+                    st.write(f"**{pres['name']}**")
+                with col2:
+                    st.write(f"{pres['total_slides']} slides")
+                with col3:
+                    st.write(f"{pres['total_chunks']} chunks")
+                with col4:
+                    st.write(pres['indexed_at'].split('T')[0])
+        else:
+            st.info("No presentations indexed yet")
+
+        st.markdown("---")
+
+        # Rate limit details
+        st.markdown("### 📈 Rate Limit Details")
+
+        col1, col2 = st.columns(2)
+
+        with col1:
+            st.markdown("#### OpenAI")
+            openai_stats = rate_limiter.get_stats("openai_vision")
+            st.json(openai_stats)
+
+        with col2:
+            st.markdown("#### Anthropic")
+            anthropic_stats = rate_limiter.get_stats("anthropic")
+            st.json(anthropic_stats)
+
+    except Exception as e:
+        st.error(f"❌ Failed to load statistics: {str(e)}")
+        logger.error(f"Failed to load statistics: {e}")
+        import traceback
+        logger.error(traceback.format_exc())
 
 
 def show_settings_page():

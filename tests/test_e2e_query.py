@@ -53,7 +53,6 @@ async def test_query_cinema_ppt():
     start_time = datetime.now()
 
     retrieval = RetrievalPipeline(
-        presentation_id=None,  # Query all presentations
         use_reranking=False    # Disable reranking for speed
     )
 
