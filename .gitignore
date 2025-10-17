@@ -40,9 +40,12 @@ ENV/
 # Data & Uploads
 data/uploads/*
 data/cache/*
+data/bm25/*.db
+data/bm25/*.dill
 !data/.gitkeep
 !data/uploads/.gitkeep
 !data/cache/.gitkeep
+!data/bm25/.gitkeep
 
 # Logs
 logs/

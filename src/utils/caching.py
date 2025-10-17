@@ -12,7 +12,7 @@ import hashlib
 from langchain.embeddings.cache import CacheBackedEmbeddings
 from langchain.storage import LocalFileStore, InMemoryStore
 from langchain.globals import set_llm_cache
-from langchain.cache import SQLiteCache, InMemoryCache
+from langchain_community.cache import SQLiteCache, InMemoryCache
 from langchain_openai import OpenAIEmbeddings, ChatOpenAI
 from loguru import logger
 

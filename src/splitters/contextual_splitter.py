@@ -186,7 +186,8 @@ Context:"""
                 if self.add_context and "context" in chunk:
                     # Prepend context to chunk for embedding
                     content = f"{chunk['context']}\n\n{chunk['text']}"
-                    with open(f"CONTEXT/{chunk["metadata"]["slide_number"]}.txt", "w", encoding="utf-8") as f:
+                    slide_num = chunk["metadata"]["slide_number"]
+                    with open(f"CONTEXT/{slide_num}.txt", "w", encoding="utf-8") as f:
                         f.write(f"{chunk['context']}\n\n{chunk['text']}\n\n")
                     # chunk["metadata"]["context"] = chunk["context"]
                     # chunk["metadata"]["original_text"] = chunk["text"]

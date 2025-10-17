@@ -66,6 +66,18 @@ class Settings(BaseSettings):
     top_k_retrieval: int = Field(20, env="TOP_K_RETRIEVAL")
     top_n_rerank: int = Field(5, env="TOP_N_RERANK")
 
+    # Search Backend Configuration
+    search_backend: str = Field("bm25", env="SEARCH_BACKEND")  # "bm25" or "elasticsearch"
+
+    # BM25 Configuration (current implementation)
+    bm25_db_path: str = Field("data/bm25/bm25_store.db", env="BM25_DB_PATH")
+    bm25_index_path: str = Field("data/bm25/bm25_index.dill", env="BM25_INDEX_PATH")
+
+    # Elasticsearch Configuration (future migration)
+    elasticsearch_url: str = Field("http://localhost:9200", env="ELASTICSEARCH_URL")
+    elasticsearch_index: str = Field("presentations", env="ELASTICSEARCH_INDEX")
+    elasticsearch_api_key: Optional[str] = Field(None, env="ELASTICSEARCH_API_KEY")
+
     # Paths
     data_dir: str = Field("data", env="DATA_DIR")
     upload_dir: str = Field("data/uploads", env="UPLOAD_DIR")
